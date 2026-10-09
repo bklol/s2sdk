@@ -568,7 +568,11 @@ public:
 	// This is also where an entity can force other entities to be transmitted if it refers to them
 	// with ehandles.
 	virtual void			CheckTransmit( CCheckTransmitInfo **pInfoInfoList, int nInfoCount, CBitVec<16384> &unionTransmitEdicts, CBitVec<16384> &,
-								const Entity2Networkable_t **pNetworkables, const uint16 *pEntityIndicies, int nEntityIndices, bool bEnablePVSBits ) = 0;
+								const Entity2Networkable_t **pNetworkables, const uint16 *pEntityIndicies, int nEntityIndices
+#if !defined( CS2 ) || !defined( LINUX )
+								, bool bEnablePVSBits
+#endif
+							) = 0;
 	
 	// TERROR: Perform any PVS cleanup before a full update
 	virtual void			PrepareForFullUpdate( CEntityIndex nPlayerEntityIndex ) = 0;

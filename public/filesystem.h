@@ -22,6 +22,7 @@
 #include "tier0/utlstring.h"
 //#include "tier1/functors.h" 
 #include "tier0/checksum_crc.h"
+#include "tier0/checksum_md5.h"
 #include "tier1/utlqueue.h"
 #include "appframework/iappsystem.h"
 #include "tier2/tier2.h"
@@ -374,11 +375,6 @@ struct FileAsyncRequest_t
 	const char *			pszPathID;			// path ID (NOTE: this field is here to remain binary compatible with release HL2 filesystem interface)
 	FSAsyncFile_t			hSpecificAsyncFile; // Optional hint obtained using AsyncBeginRead()
 	FSAllocFunc_t			pfnAlloc;			// custom allocator. can be null. not compatible with FSASYNC_FLAGS_FREEDATAPTR
-};
-
-struct MD5Value_t
-{
-	unsigned char bits[16];
 };
 
 struct FileHash_t
