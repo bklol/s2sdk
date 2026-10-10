@@ -22,7 +22,9 @@ public:
 	bool operator!=( const CPlayerUserId &other ) const { return other._index != _index; }
 
 private:
-	short _index;
+	unsigned short _index;
 };
+
+static_assert( sizeof( CPlayerUserId ) == 0x2 );
 
 #endif // PLAYERUSERID_H
