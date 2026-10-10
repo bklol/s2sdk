@@ -12,6 +12,7 @@
 #include "tier0/fasttimer.h"
 #include "tier0/l2cache.h"
 #include "tier0/threadtools.h"
+#include "tier1/utlvector.h"
 
 // VProf is enabled by default in all configurations -except- X360 Retail.
 #if !( defined( _X360 ) && defined( _CERT ) )
@@ -74,13 +75,8 @@
 
 #define VPROF_ONLY( expression )	expression
 
-#define VPROF_ENTER_SCOPE( name ) \
-	do \
-	{ \
-		static VProfBudgetGroupCallSite vprofBudgetGroup( VPROF_BUDGETGROUP_OTHER_UNACCOUNTED, 0 ); \
-		g_VProfCurrentProfile.EnterScope( name, false, vprofBudgetGroup, { __FILE__, __LINE__, __func__ } ); \
-	} while ( 0 )
-#define VPROF_EXIT_SCOPE()					g_VProfCurrentProfile.ExitScope()
+#define VPROF_ENTER_SCOPE( name )			VProf_EnterScopeAdHoc( name, { __FILE__, __LINE__, __func__ } )
+#define VPROF_EXIT_SCOPE()					VProf_ExitScope()
 
 #define VPROF_BUDGET_GROUP_ID_UNACCOUNTED 0
 
@@ -233,51 +229,28 @@
 
 #ifdef VPROF_ENABLED
 
-template < class T, typename I, size_t N > class CUtlVectorMemory_Growable;
-template < class T, typename I, class A > class CUtlVector;
-
 class CUtlSourceLocation
 {
 public:
-	CUtlSourceLocation( const char *pFileName, uint64 nLine, const char *pFunctionName ) :
-		m_pszFileName( pFileName ), m_nLine( nLine ), m_pszFunctionName( pFunctionName )
+	CUtlSourceLocation( const char *file_path, uint64 file_line, const char *method_name ) :
+		m_FilePath( file_path ), m_FileLine( file_line ), m_MethodName( method_name )
 	{}
-
-	const char *m_pszFileName;
-	uint64 m_nLine;
-	const char *m_pszFunctionName;
-};
-
-struct VProfBudgetGroupCallSite
-{
-	VProfBudgetGroupCallSite( const char *pGroupName, int nFlags, int nGroupId = VPROF_BUDGET_GROUP_ID_UNACCOUNTED ) :
-		m_pszGroupName( pGroupName ), m_nFlags( nFlags ), m_nGroupID( nGroupId )
-	{}
-
-	const char *m_pszGroupName;
-	int m_nFlags;
-	int m_nGroupID;
-};
-
-// One entry is selected with CVProfNode::m_nBudgetGroupID. The table pointer and
-// entry count are private globals in tier0.
-struct VProfBudgetGroupEntry
-{
-	const char *m_pszGroupName;
-	int m_nFlags;
 
 private:
-	uint8 m_pad000C[4092];
+	const char *m_FilePath;
+	uint64 m_FileLine;
+	const char *m_MethodName;
 };
 
-class VProfReportSettings_t;
-class CVProfSummingContext;
-struct VProfDataReportItem_t;
-struct CVProfLayoutVerifier;
+// Enters a scope of the Unaccounted budget group, on the profiled thread only
+PLATFORM_INTERFACE void VProf_EnterScopeAdHoc( const char *pszName, CUtlSourceLocation location );
+PLATFORM_INTERFACE void VProf_ExitScope();
 
-COMPILE_TIME_ASSERT( sizeof( CUtlSourceLocation ) == 24 );
-COMPILE_TIME_ASSERT( sizeof( VProfBudgetGroupCallSite ) == 16 );
-COMPILE_TIME_ASSERT( sizeof( VProfBudgetGroupEntry ) == 4104 );
+struct VProfReportSettings_t;
+struct CVProfSummingContext;
+struct VProfBudgetGroupCallSite;
+
+typedef void (*VProfExitScopeCB)();
 
 //-----------------------------------------------------------------------------
 //
@@ -288,21 +261,18 @@ class PLATFORM_CLASS CVProfNode
 {
 	friend class CVProfRecorder;
 	friend class CVProfile;
-	friend struct CVProfLayoutVerifier;
 
 public:
 	CVProfNode( const char *pszName, CVProfNode *pParent, VProfBudgetGroupCallSite &pBudgetGroupName, const CUtlSourceLocation &location );
 	~CVProfNode();
-	
-	CVProfNode &operator=( const CVProfNode & );
 
-	CVProfNode *GetVParent();
-	const CVProfNode *GetVParent() const;
-	CVProfNode *GetVSibling();
+	CVProfNode *GetVParent() { return m_pParent; }
+	const CVProfNode *GetVParent() const { return m_pParent; }
+	CVProfNode *GetVSibling() { return m_pSibling; }
 	const CVProfNode *GetVPrevSibling() const;
-	const CVProfNode *GetVSibling() const;
-	CVProfNode *GetVChild();
-	const CVProfNode *GetVChild() const;
+	const CVProfNode *GetVSibling() const { return m_pSibling; }
+	CVProfNode *GetVChild() { return m_pChild; }
+	const CVProfNode *GetVChild() const { return m_pChild; }
 	
 	void MarkFrame();
 	void ResetPeak();
@@ -316,91 +286,123 @@ public:
 
 	CVProfNode *FindOrCreateChild( const char *, VProfBudgetGroupCallSite &, const CUtlSourceLocation & );
 
-	const char *GetName() const;
+	const char *GetName() const { return m_pszName; }
 
 	// Only used by the record/playback stuff.
-	void SetBudgetGroupID( int id );
-	int GetBudgetGroupID() const;
+	void SetBudgetGroupID( int id ) { m_BudgetGroupID = id; }
+	int GetBudgetGroupID() const { return m_BudgetGroupID; }
 
-	int	GetCurCalls() const;
-	double GetCurTime() const;
-	int GetPrevCalls() const;
-	double GetPrevTime() const;
-	int	GetTotalCalls() const;
-	double GetTotalTime() const;
-	double GetPeakTime() const;
+	// Times are in milliseconds
+	int	GetCurCalls() const { return m_nCurFrameCalls; }
+	double GetCurTime() const { return CyclesToMilliseconds( m_CurFrameTime ); }
+	int GetPrevCalls() const { return m_nPrevFrameCalls; }
+	double GetPrevTime() const { return CyclesToMilliseconds( m_PrevFrameTime ); }
+	int	GetTotalCalls() const { return m_nTotalCalls; }
+	double GetTotalTime() const { return CyclesToMilliseconds( m_TotalTime ); }
+	double GetPeakTime() const { return CyclesToMilliseconds( m_PeakTime ); }
 
-	const CUtlSourceLocation &GetSourceLocation() const;
+	const CUtlSourceLocation &GetSourceLocation() const { return m_SourceLocation; }
 
 	double GetCurTimeLessChildren() const;
 	double GetPrevTimeLessChildren() const;
 	double GetTotalTimeLessChildren() const;
 
-	void ClearPrevTime();
+	void ClearPrevTime() { m_PrevFrameTime.Init(); m_unk301 = 0; }
 
 	// Not used in the common case...
 	void SetCurFrameTime( unsigned long milliseconds );
 	
-	void SetClientData( int iClientData );
-	int GetClientData() const;
-
-#ifdef DBGFLAG_VALIDATE
-	void Validate( CValidator &validator, tchar *pchName );		// Validate our internal structures
-#endif // DBGFLAG_VALIDATE
-
+	void SetClientData( int iClientData ) { m_iClientData = iClientData; }
+	int GetClientData() const { return m_iClientData; }
 
 // Used by vprof record/playback.
-private:
+protected:
 	CVProfNode( const char *, VProfBudgetGroupCallSite &, double, const CUtlSourceLocation & );
 
-	void SetUniqueNodeID( int id );
-	int GetUniqueNodeID() const;
-
-	static int s_iCurrentUniqueNodeID;
-
-public:
-	const char *m_pszName;
-	uint64 m_nTimer;
+	void SetUniqueNodeID( int id ) { m_iUniqueNodeID = id; }
+	int GetUniqueNodeID() const { return m_iUniqueNodeID; }
 
 private:
-	uint8 m_pad0010[8];
+	static double CyclesToMilliseconds( const CCycleCount &cycles ) { return cycles.GetLongCycles() * ( 1000.0 / Plat_CPUTickFrequency() ); }
 
-public:
-	int m_nRecursions;
-	unsigned m_nCurFrameCalls;
-	uint64 m_nCurFrameTime;
-	uint64 m_nCurFrameTimeLessChildren;
-	unsigned m_nPrevFrameCalls;
+	const tchar *m_pszName;
+	CFastTimer	m_Timer;
+	// AMNOTE: The first is zeroed whenever m_Timer starts, tier0 never reads either
+	int			m_unk101;
+	// AMNOTE: Only the constructor writes it, zeroing it together with m_unk101, so the two may be one 8-byte field
+	int			m_unk102;
 
-private:
-	uint8 m_pad0034[4];
+	int			m_nRecursions;
+	
+	unsigned	m_nCurFrameCalls;
+	CCycleCount	m_CurFrameTime;
+	// AMNOTE: tier0 only zeroes it or copies it along with the time before it, as with the ones below
+	uint64		m_unk201;
+	
+	unsigned	m_nPrevFrameCalls;
+	CCycleCount	m_PrevFrameTime;
+	uint64		m_unk301;
 
-public:
-	uint64 m_nPrevFrameTime;
-	uint64 m_nPrevFrameTimeLessChildren;
-	unsigned m_nTotalCalls;
+	unsigned	m_nTotalCalls;
+	CCycleCount	m_TotalTime;
+	uint64		m_unk401;
 
-private:
-	uint8 m_pad004C[4];
+	CCycleCount	m_PeakTime;
+	uint64		m_unk501;
 
-public:
-	uint64 m_nTotalTime;
-	uint64 m_nTotalTimeLessChildren;
-	uint64 m_nPeakTime;
-	uint64 m_nPeakTimeLessChildren;
+	unsigned	m_nMergedCurFrameCalls;
+	CCycleCount	m_MergedCurFrameTime;
+
 	CVProfNode *m_pParent;
 	CVProfNode *m_pChild;
 	CVProfNode *m_pSibling;
-	int m_nBudgetGroupID;
+
+	int m_BudgetGroupID;
+	
 	int m_iClientData;
 	int m_iUniqueNodeID;
 
-private:
-	uint8 m_pad0094[4];
-
-public:
 	CUtlSourceLocation m_SourceLocation;
 };
+
+inline const CVProfNode *CVProfNode::GetVPrevSibling() const
+{
+	if ( !m_pParent )
+		return NULL;
+
+	const CVProfNode *pNode = m_pParent->m_pChild;
+	while ( pNode && pNode->m_pSibling != this )
+		pNode = pNode->m_pSibling;
+
+	return pNode;
+}
+
+inline double CVProfNode::GetCurTimeLessChildren() const
+{
+	double result = GetCurTime();
+	for ( const CVProfNode *pChild = m_pChild; pChild; pChild = pChild->m_pSibling )
+		result -= pChild->GetCurTime();
+
+	return result;
+}
+
+inline double CVProfNode::GetPrevTimeLessChildren() const
+{
+	double result = GetPrevTime();
+	for ( const CVProfNode *pChild = m_pChild; pChild; pChild = pChild->m_pSibling )
+		result -= pChild->GetPrevTime();
+
+	return result;
+}
+
+inline double CVProfNode::GetTotalTimeLessChildren() const
+{
+	double result = GetTotalTime();
+	for ( const CVProfNode *pChild = m_pChild; pChild; pChild = pChild->m_pSibling )
+		result -= pChild->GetTotalTime();
+
+	return result;
+}
 
 //-----------------------------------------------------------------------------
 //
@@ -434,40 +436,24 @@ enum CounterGroup_t
 
 class PLATFORM_CLASS CVProfile 
 {
-	friend struct CVProfLayoutVerifier;
-
 public:
 	CVProfile();
 	~CVProfile();
 
 	int AssignNextTimespanId();
 	
-	void Start();
-	void Stop();
 	void Term();
-
-	void SetTargetThreadId( unsigned id );
-	uint32 GetTargetThreadId();
-	bool InTargetThread();
 
 	void CalcBudgetGroupTimes_Recursive( CVProfNode *, unsigned int *, int, float );
 
-	void EnterScope( const char *pszName, bool bAssertAccounted, VProfBudgetGroupCallSite &pBudgetGroupName, const CUtlSourceLocation &location );
-	void EnterScopeChecked( const char *pszName, bool bAssertAccounted, VProfBudgetGroupCallSite &pBudgetGroupName, const CUtlSourceLocation &location );
-	void EnterScopeNode( CVProfNode *node );
-	void ExitScope();
-	void ExitScopeChecked();
+	void EnterScopeNodeTargetThread( CVProfNode *node );
+	void ExitScopeTargetThread();
 
-	void MarkFrame();
-	void ResetPeaks();
-	
-	void Pause();
-	void Resume();
-	void Reset();
-	
-	bool IsEnabled() const;
-
-	bool AtRoot() const;
+	static VProfExitScopeCB EnterScopeBackgroundThread( const char *pszName, VProfBudgetGroupCallSite &budgetGroup, const CUtlSourceLocation &location );
+	static void ExitScopeBackgroundThread();
+	CVProfNode *GetBackgroundRoot();
+	void MergeBackgroundTrees();
+	void SetProfileAllThreads( bool bProfileAllThreads );
 
 	//
 	// Queries
@@ -475,29 +461,14 @@ public:
 
 #ifdef VPROF_VTUNE_GROUP
 #	define MAX_GROUP_STACK_DEPTH 1024
-
-	void EnableVTuneGroup( const char *pGroupName );
-	void DisableVTuneGroup( void );
-	
-	void PushGroup( int nGroupID );
-	void PopGroup( void );
 #endif
-	
-	int NumFramesSampled() const;
-	double GetPeakFrameTime() const;
-	double GetTotalTimeSampled() const;
-	double GetTimeLastFrame() const;
-	double GetTotalSecondsSampled() const;
-	double GetTotalWallClockSecondsSampled();
 	
 	void SetOutputStream( void (*)(const char *, ...) );
 
-	CVProfNode *GetRoot();
 	CVProfNode *FindNode( CVProfNode *pStartNode, const char *pszNode );
 
 	void OutputReport( const VProfReportSettings_t &, const char *pszStartNode, int budgetGroupID = -1 );
 	void OutputReport( const char *pszStartNode = NULL, int budgetGroupID = -1 );
-	void GenerateDataReport( CUtlVector< VProfDataReportItem_t, int, CUtlVectorMemory_Growable< VProfDataReportItem_t, int, 0 > > *pReport );
 
 	static int GetNumBudgetGroups( void );
 	static const char *GetBudgetGroupName( int budgetGroupID );
@@ -506,34 +477,22 @@ public:
 
 	static int BudgetGroupNameToBudgetGroupID( const char *pBudgetGroupName );
 	static int BudgetGroupNameToBudgetGroupID( const char *pBudgetGroupName, int budgetFlagsToORIn );
-	static int BudgetGroupNameToBudgetGroupIDNoCreate( const char *pBudgetGroupName );
 
 	void HideBudgetGroup( int budgetGroupID, bool bHide = true );
-	void HideBudgetGroup( const char *pszName, bool bHide = true );
 
-	uint64 *FindOrCreateCounter( const char *pName, CounterGroup_t eCounterGroup = COUNTER_GROUP_DEFAULT );
+	uint64_t *FindOrCreateCounter( const char *pName, CounterGroup_t eCounterGroup = COUNTER_GROUP_DEFAULT );
 	void ResetCounters( CounterGroup_t eCounterGroup );
 	
 	int GetNumCounters( void ) const;
 	
-	uint64 GetCounterValue( int index ) const;
+	uint64_t GetCounterValue( int index ) const;
 	const char *GetCounterName( int index ) const;
-	const char *GetCounterNameAndValue( int index, uint64 &val ) const;
+	const char *GetCounterNameAndValue( int index, uint64_t &val ) const;
 	CounterGroup_t GetCounterGroup( int index ) const;
 
-	CVProfNode *GetCurrentNode();
-
-#ifdef DBGFLAG_VALIDATE
-	void Validate( CValidator &validator, tchar *pchName );		// Validate our internal structures
-#endif // DBGFLAG_VALIDATE
-
 protected:
-	void FreeNodes_R( CVProfNode *pNode );
 
-#ifdef VPROF_VTUNE_GROUP
-	bool VTuneGroupEnabled();
-	int VTuneGroupID();
-#endif
+	void FreeNodes_R( CVProfNode *pNode );
 
 	void SumTimes( const char *pszStartNode, int budgetGroupID, CVProfSummingContext & );
 	void SumTimes( const CVProfNode *pNode, int budgetGroupID, CVProfSummingContext & );
@@ -541,68 +500,61 @@ protected:
 	static int FindBudgetGroupName( const char *pBudgetGroupName );
 	static int AddBudgetGroupName( const char *pBudgetGroupName, int budgetFlags );
 
-public:
-	bool m_bVTuneGroupEnabled;
-
-private:
-	uint8 m_pad0001[3];
-
-public:
-	int m_nVTuneGroupID;
-	int m_nGroupIDStack[MAX_GROUP_STACK_DEPTH];
-	int m_nGroupIDStackDepth;
-	int m_nEnabled;
-	bool m_bAtRoot;
-
-private:
-	uint8 m_pad1011[7];
-
-public:
+#ifdef VPROF_VTUNE_GROUP
+	bool		m_bVTuneGroupEnabled;
+	int			m_nVTuneGroupID;
+	int			m_GroupIDStack[MAX_GROUP_STACK_DEPTH];
+	int			m_GroupIDStackDepth;
+#endif
+	int 		m_enabled;
+	CVProfNode	m_Root;
+	// AMNOTE: Points at m_Root after construction
+	CVProfNode *m_unk101;
 	CVProfNode *m_pCurNode;
-	CVProfNode m_Root;
-	int m_nFrames;
-	int m_nProfileDetailLevel;
+	bool		m_fAtRoot; // tracked for efficiency of the "not profiling" case
+	// AMNOTE: The engine never reads or writes it
+	int			m_unk201;
+	int			m_nFrames;
+	int			m_pausedEnabledDepth;
 
-private:
-	uint8 m_pad10D8[32];
+	// Wall clock seconds
+	double		m_flStartTime;
+	double		m_flStopTime;
+	double		m_flPauseStartTime;
+	double		m_flTotalPauseTime;
 
-public:
-	uint64 m_nCounters[MAXCOUNTERS];
-	char m_eCounterGroups[MAXCOUNTERS]; // (These are CounterGroup_t's).
-	const char *m_pszCounterNames[MAXCOUNTERS];
-	int m_nCounterCount;
+	uint64 m_Counters[MAXCOUNTERS];
+	char m_CounterGroups[MAXCOUNTERS]; // (These are CounterGroup_t's).
+	tchar *m_CounterNames[MAXCOUNTERS];
+	int m_NumCounters;
+	CAtomicMutex m_CounterMutex;
 
-private:
-	uint8 m_pad21FC[4];
+	// AMNOTE: The element types are unknown, the constructor never sets a size in them, so they may not be CUtlVectors
+	CUtlVector< uint8 > m_unk301[256];
+	int m_unk302;
+	CUtlVector< uint8 > m_unk303[256];
+	int m_unk304;
+	CUtlVector< uint8 > m_unk305[256];
+	int m_unk306;
 
-public:
-	uint8 m_CounterMutex[16];
-
-private:
-	uint8 m_pad2210[6152];
-	uint8 m_pad3A18[6152];
-	uint8 m_pad5220[6152];
-
-public:
-	uint64 m_nTargetThreadID;
-	void ( *m_pOutputStream )( const char *, ... );
+	int m_nNextTimespanId;
+	ThreadId_t m_TargetThreadId;
+	bool m_bProfileAllThreads;
+	CVProfNode *m_pBackgroundRoot;
+	// AMNOTE: Each element points at a background thread's root node
+	CUtlVector< CVProfNode ** > m_unk401;
+	CAtomicMutex m_BackgroundRootMutex;
+	void (*m_pOutputStream)( const char *, ... );
 };
-
-COMPILE_TIME_ASSERT( sizeof( CVProfNode ) == 176 );
-COMPILE_TIME_ASSERT( sizeof( CVProfile ) == 27192 );
 
 //-------------------------------------
 
 PLATFORM_INTERFACE CVProfile g_VProfCurrentProfile;
-PLATFORM_INTERFACE LoggingChannelID_t LOG_VPROF;
 
 
 //-----------------------------------------------------------------------------
 
 PLATFORM_INTERFACE bool g_VProfSignalSpike;
-PLATFORM_INTERFACE bool g_VProfNodeSpikeReporting;
-PLATFORM_INTERFACE float g_VProfNodeSpikeMinimumMs;
-PLATFORM_INTERFACE float g_VProfNodeSpikeMultiplier;
 
 class CVProfSpikeDetector
 {
@@ -640,9 +592,17 @@ private:
 
 //-----------------------------------------------------------------------------
 
-typedef void (*VProfExitScopeCB)();
+struct VProfBudgetGroupCallSite
+{
+	VProfBudgetGroupCallSite( const char *group_name, int flags, int group_id = VPROF_BUDGET_GROUP_ID_UNACCOUNTED ) :
+		m_pGroupName( group_name ), m_nFlags( flags ), m_nGroupId( group_id ) { }
 
-template < int DETAIL_LEVEL, bool ASSERT_ACCOUNTED >
+	const char *m_pGroupName;
+	int m_nFlags;
+	int m_nGroupId;
+};
+
+template <int DETAIL_LEVEL, bool ASSERT_ACCOUNTED>
 class VProfScopeHelper
 {
 public:
@@ -653,8 +613,8 @@ public:
 
 	VProfScopeHelper( const char *pszName, const char *pszGroupName, int nFlags, const CUtlSourceLocation &location )
 	{
-		VProfBudgetGroupCallSite budgetGroup( pszGroupName, nFlags );
-		m_pExitScope = EnterScopeInternalBudgetFlags( pszName, budgetGroup, location );
+		VProfBudgetGroupCallSite budget_group( pszGroupName, nFlags );
+		m_pExitScope = EnterScopeInternalBudgetFlags( pszName, budget_group, location );
 	}
 
 	VProfScopeHelper( VProfScopeHelper &other )
@@ -669,15 +629,15 @@ public:
 
 	void ExitScope()
 	{
-		if ( !m_pExitScope )
+		if(!m_pExitScope)
 			return;
 
 		m_pExitScope();
 		m_pExitScope = nullptr;
 	}
 
-	DLL_CLASS_IMPORT VProfScopeHelper &operator=( const VProfScopeHelper &other );
-	DLL_CLASS_IMPORT VProfScopeHelper &operator=( VProfScopeHelper &&other );
+	VProfScopeHelper &operator=( const VProfScopeHelper &other ) = delete;
+	VProfScopeHelper &operator=( VProfScopeHelper &&other ) = delete;
 
 	static DLL_CLASS_IMPORT VProfExitScopeCB EnterScopeInternal( const char *pszName, const CUtlSourceLocation &location );
 	static DLL_CLASS_IMPORT VProfExitScopeCB EnterScopeInternalBudgetFlags( const char *pszName, VProfBudgetGroupCallSite &budgetGroup, const CUtlSourceLocation &location );
@@ -699,13 +659,13 @@ public:
 	~CVProfCounter()
 	{
 	}
-	void Increment( uint64 val )
+	void Increment( uint64_t val )
 	{ 
 		Assert( m_pCounter );
 		*m_pCounter += val; 
 	}
 private:
-	uint64 *m_pCounter;
+	uint64_t *m_pCounter;
 };
 
 #endif

@@ -17,7 +17,7 @@
 #include "tier1/utlmap.h"
 
 // Include this because tons of code was implicitly getting utlsymbol or utlvector via utldict.h
-#include "tier0/utlsymbol.h"
+#include "tier1/utlsymbol.h"
 
 #include "tier0/memdbgon.h"
 
@@ -45,12 +45,10 @@ template <> struct CDictCompareTypeDeducer<k_eDictCompareTypeFilenames> { typede
 //-----------------------------------------------------------------------------
 // A dictionary mapping from symbol to structure
 //-----------------------------------------------------------------------------
-schema template <class T, class I = int, int COMPARE_TYPE = k_eDictCompareTypeCaseInsensitiveFast> 
+template <class T, class I = int, int COMPARE_TYPE = k_eDictCompareTypeCaseInsensitiveFast> 
 class CUtlDict
 {
 public:
-	TYPEMETA( MAtomicTransfersAsMap );
-
 	// constructor, destructor
 	// Left at growSize = 0, the memory will first allocate 1 element and double in size
 	// at each increment.
@@ -103,35 +101,12 @@ public:
 	I		First() const;
 	I		Next( I i ) const;
 
-	// Nested typedefs, for code that might need
+	// Nested typedefs, for code that might need 
 	// to fish out the index type from a given dict
 	typedef I IndexType_t;
 
-	template < typename D >
-	class iterator
-	{
-	public:
-		iterator( D *p, I i ) : m_p( p ), m_i( i ) {}
-
-		auto &operator*() const							{ return m_p->Element( m_i ); }
-		iterator &operator++()							{ m_i = m_p->Next( m_i ); return *this; }
-		bool operator!=( const iterator &rhs ) const	{ return m_i != rhs.m_i; }
-
-		char const *Name() const						{ return m_p->GetElementName( m_i ); }
-		I Index() const									{ return m_i; }
-
-	private:
-		D *m_p;
-		I m_i;
-	};
-
-	iterator< CUtlDict > begin()						{ return { this, First() }; }
-	iterator< CUtlDict > end()							{ return { this, InvalidIndex() }; }
-	iterator< const CUtlDict > begin() const			{ return { this, First() }; }
-	iterator< const CUtlDict > end() const				{ return { this, InvalidIndex() }; }
-
 protected:
-	typedef CUtlMap<const char *, T, I, typename CDictCompareTypeDeducer<COMPARE_TYPE>::Type_t> DictElementMap_t;
+	typedef CUtlOrderedMap<const char *, T, typename CDictCompareTypeDeducer<COMPARE_TYPE>::Type_t, I> DictElementMap_t;
 	DictElementMap_t m_Elements;
 };
 
@@ -140,7 +115,7 @@ protected:
 // constructor, destructor
 //-----------------------------------------------------------------------------
 template <class T, class I, int COMPARE_TYPE>
-CUtlDict<T, I, COMPARE_TYPE>::CUtlDict( int growSize, int initSize ) : m_Elements( growSize, initSize, typename CDictCompareTypeDeducer<COMPARE_TYPE>::Type_t{} )
+CUtlDict<T, I, COMPARE_TYPE>::CUtlDict( int growSize, int initSize ) : m_Elements( growSize, initSize )
 {
 }
 
@@ -303,7 +278,10 @@ void CUtlDict<T, I, COMPARE_TYPE>::PurgeAndDeleteElements()
 	while ( index != m_Elements.InvalidIndex() )
 	{
 		free( (void *)m_Elements.Key( index ) );
-		delete m_Elements[index];
+		if constexpr ( std::is_pointer_v<T> )
+		{
+			delete m_Elements[index];
+		}
 		index = m_Elements.NextInorder( index );
 	}
 

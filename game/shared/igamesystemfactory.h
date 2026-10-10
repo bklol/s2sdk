@@ -11,8 +11,7 @@
 #pragma once
 #endif
 
-#include <string.h>
-#include "tier0/dbg.h"
+#include "string.h"
 #include "igamesystem.h"
 
 /*
@@ -34,8 +33,6 @@
 * and its callbacks should trigger.
 */
 
-using GameSystemListeners_t = CUtlVector< CUtlVector< IGameSystem * > >;
-
 abstract_class IGameSystemFactory
 {
 public:
@@ -54,77 +51,28 @@ public:
 class CBaseGameSystemFactory : public IGameSystemFactory
 {
 protected:
-	explicit CBaseGameSystemFactory(const char* pName)
+	CBaseGameSystemFactory(const char* pName)
 	{
 		m_pName = pName;
-		m_pNext = *sm_pFirst;
-		*sm_pFirst = this;
+		m_pNext = *CBaseGameSystemFactory::sm_pFirst;
+		*CBaseGameSystemFactory::sm_pFirst = this;
 	}
-
-	virtual ~CBaseGameSystemFactory() = default;
 
 private:
 	CBaseGameSystemFactory* m_pNext;
 	const char* m_pName;
 
 public:
-	void Destroy()
+	static IGameSystem* GetGlobalPtrByName(const char* pName)
 	{
-		CBaseGameSystemFactory* pFactoryCurrent = *sm_pFirst;
-		CBaseGameSystemFactory* pFactoryPrevious = nullptr;
-		while (pFactoryCurrent)
-		{
-			if (strcmp(pFactoryCurrent->m_pName, m_pName) == 0)
-			{
-				if (pFactoryPrevious == nullptr)
-				{
-					*sm_pFirst = pFactoryCurrent->m_pNext;
-				}
-				else
-				{
-					pFactoryPrevious->m_pNext = pFactoryCurrent->m_pNext;
-				}
-				delete pFactoryCurrent;
-				return;
-			}
-			pFactoryPrevious = pFactoryCurrent;
-			pFactoryCurrent = pFactoryCurrent->m_pNext;
-		}
-	}
-
-	const char *GetName() const { return m_pName; }
-	CBaseGameSystemFactory *GetNext() const { return m_pNext; }
-
-	static void LoopByFactories( void ( *pfnFunc )( CBaseGameSystemFactory *pFactory ) )
-	{
-		CBaseGameSystemFactory* pFactoryList = *sm_pFirst;
-		while (pFactoryList)
-		{
-			pfnFunc( pFactoryList );
-			pFactoryList = pFactoryList->GetNext();
-		}
-	}
-
-	static CBaseGameSystemFactory* GetFactoryByName(const char* pName)
-	{
-		CBaseGameSystemFactory* pFactoryList = *sm_pFirst;
+		CBaseGameSystemFactory* pFactoryList = *CBaseGameSystemFactory::sm_pFirst;
 		while (pFactoryList)
 		{
 			if (strcmp(pFactoryList->m_pName, pName) == 0)
 			{
-				return pFactoryList;
+				return pFactoryList->GetStaticGameSystem();
 			}
 			pFactoryList = pFactoryList->m_pNext;
-		}
-		return nullptr;
-	}
-
-	static IGameSystem* GetGlobalPtrByName(const char* pName)
-	{
-		CBaseGameSystemFactory* pFactory = GetFactoryByName(pName);
-		if (pFactory)
-		{
-			return pFactory->GetStaticGameSystem();
 		}
 		return nullptr;
 	}
@@ -179,30 +127,13 @@ private:
 	U** m_ppGlobalPointer;
 };
 
-class CBaseReallocatingGameSystemFactory : public CBaseGameSystemFactory
+template <class T, class U = T>
+class CGameSystemReallocatingFactory : public CBaseGameSystemFactory
 {
-protected:
-	CBaseReallocatingGameSystemFactory(const char* pName, void** ppGlobalPointer) : CBaseGameSystemFactory(pName)
+public:
+	CGameSystemReallocatingFactory(const char* pName, U** ppGlobalPointer = nullptr) : CBaseGameSystemFactory(pName)
 	{
 		m_ppGlobalPointer = ppGlobalPointer;
-	}
-
-public:
-	IGameSystem* GetCurrentGameSystem() const
-	{
-		return m_ppGlobalPointer ? static_cast<IGameSystem*>(*m_ppGlobalPointer) : nullptr;
-	}
-
-protected:
-	void** m_ppGlobalPointer;
-};
-
-template <class T, class U = T>
-class CGameSystemReallocatingFactory : public CBaseReallocatingGameSystemFactory
-{
-public:
-	CGameSystemReallocatingFactory(const char* pName, U** ppGlobalPointer = nullptr) : CBaseReallocatingGameSystemFactory(pName, reinterpret_cast<void**>(ppGlobalPointer))
-	{
 	}
 
 	bool Init() override { return true; }
@@ -229,41 +160,15 @@ public:
 	{
 		if (m_ppGlobalPointer)
 		{
-			*reinterpret_cast<U**>(m_ppGlobalPointer) = reinterpret_cast<T*>(pValue);
+			*m_ppGlobalPointer = reinterpret_cast<T*>(pValue);
 		}
 	}
 
 	bool IsReallocating() override { return true; }
 	IGameSystem* GetStaticGameSystem() override { return nullptr; }
-};
-
-struct AddedGameSystem_t
-{
-	IGameSystem *m_pGameSystem;
-	int m_nPriority;
-	int m_nInsertionOrder;
-};
-
-abstract_class IGameSystemEventDispatcher
-{
-public:
-	virtual void RegisterListener( GameSystemEventId_t id, IGameSystem *pSystem ) = 0;
-	virtual void UnregisterListener( IGameSystem *pSystem ) = 0;
-};
-
-class CGameSystemEventDispatcher : public IGameSystemEventDispatcher
-{
-public:
-	CGameSystemEventDispatcher( GameSystemListeners_t *pListeners ) : m_funcListeners( pListeners ) {}
-
-	GameSystemListeners_t &GetListenersRef() { Assert( m_funcListeners ); return *m_funcListeners; }
-
-	void RegisterListener( GameSystemEventId_t id, IGameSystem *pSystem ) override { GetListenersRef().InsertAfter( id, {pSystem} ); }
-	void UnregisterListener( IGameSystem *pSystem ) override { for ( auto &it : GetListenersRef() ) if ( it.FindAndRemove( pSystem ) ) break; }
 
 private:
-	GameSystemListeners_t *m_funcListeners;
+	U** m_ppGlobalPointer;
 };
-
 
 #endif // IGAMESYSTEMFACTORY_H

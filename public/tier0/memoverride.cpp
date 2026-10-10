@@ -6,359 +6,13 @@
 // $NoKeywords: $
 //=============================================================================//
 
-#ifdef SN_TARGET_PS3
-
-#ifdef PS3MEMOVERRIDEWRAP
-/*
-	=========   PS3 LAUNCHER MAIN ELF SECTION  ==================
-	=========   Vitaliy   =======   May 2010  ===================
-
-	The implementation of memory allocation wraps in the scenario
-	of bootstrapping ELF and PRXs is as follows:
-
-	ELF wraps all memory allocation CRT function here (see --wrap below)
-
-	ELF lets all statically linked libraries to initialize before
-	main function runs, it is required in order to be able to load
-	any PRXs to initialize some CRT globals and sysmodules data.
-	
-	ELF tries to load tier0.prx containing the custom memory
-	management allocator as soon as possible in main function.
-
-	So this is when allocations can be happening:
-	1) global CRT contructors calling malloc (IOBUFs,mutexes,etc.)
-	2) main calling malloc indirectly trying to determine boot
-	   parameters and where to load tier0.prx module
-	>>--->>-- here we already inject tier0 custom allocator!! <<----
-    3) global consturctors of tier0.prx before tier0 prx entry
-	   point function runs
-    4) tier0 prx entry point function returns to bootstrapper's main
-	5) everything else
-
-	****** WHAT HAPPENS BEFORE TIER0 CUSTOM ALLOCATOR IS AVAILABLE?
-
-		Since all memory allocation calls are going into our custom
-		wrapped malloc/free implementation that doesn't yet have real
-		custom allocator, we create a static .bss section array (256Kb)
-		and we just hand out 16-byte aligned addresses from this array.
-		The memory allocated from this .bss section is essentially never
-		freed. Test runs show that roughly 68Kb is actually allocated
-		before tier0 custom allocator becomes available.
-
-	****** HOW DO WE INJECT TIER0 CUSTOM ALLOCATOR SO EARLY?
-
-		For this we utilize two tricks.
-		
-		RUN SOME CODE IN TIER0 BEFORE EVERYTHING ELSE:
-			We use attribute "init_priority(101)" on a global struct
-			in tier0 to run its constructor function before any other
-			global objects in tier0 construct.
-			That function calls into ELF to obtain real addresses of
-			real CRT functions, constructs the custom memory allocator
-			and signals the ELF the pointer to allocator's interface,
-			so all other tier0 global objects will already use the
-			custom allocator's interface even though tier0's entry point
-			didn't run yet.
-
-		EARLY COMMUNICATION ELF-PRX BEFORE PRX ENTRY POINT
-			We use CRT wrap function "malloc_stats", we call it with
-			special parameters passing data from PRX into ELF wrapper.
-			Return value of the function essentially passes data back
-			from ELF into PRX thus allowing to handshake in the guts
-			of PRX loading code between ELF calling prx_start_module
-			and prx entry point.
-
-	=============================================================
-
-	We must be using --wrap=<symbol> on PS3 SNC compiler to wrap
-	all calls to malloc-related functions.
-
-	--wrap=<symbol>
-		
-		Use wrapper functions for <symbol>. If the linker is passed
-		the argument '-wrap=foo', it will resolve references to the
-		symbol foo to __wrap_foo; in addition, a new symbol __real_foo
-		will be created which will resolve to the original foo.
-		
-		For example, by defining a function __wrap_fopen() that
-		implements any desired wrapping logic and that invokes the
-		real fopen() call through the __real_foo symbol, we can give
-		the linker the argument '--wrap=fopen' and easily intercept
-		calls to fopen().
-
-		extern FILE *__real_fopen (const char * restrict filename, const char * restrict mode);
-
-		FILE *__wrap_fopen (const char * restrict filename, const char * restrict mode)
-		{
-			printf ('open %s\n', filename);
-			return __real_fopen (filename, mode);
-		}
-*/
-
-#define _PS3 1
-#include <stdlib.h>
-#include "memalloc.h"
-#include "dbg.h"
-#include "memoverride_ps3.h"
-#include "../steam/steam_platform_ps3/steamps3params.h"
-
-#define WRAP_FN_HOOK( name ) __wrap_##name
-#define WRAP_FN_REAL( name ) __real_##name
-
-static IMemAlloc *g_p_tier0_memalloc_interface = NULL;
-#ifdef g_pMemAlloc
-	#undef g_pMemAlloc
-#endif
-#define g_pMemAlloc g_p_tier0_memalloc_interface
-
-char g_ps3_malloc_startup_buffer[ 256 * 1024 ];
-int g_ps3_malloc_startup_index = 0;
-inline void * MallocStartupBuffer()
-{
-	return &g_ps3_malloc_startup_buffer[ g_ps3_malloc_startup_index ];
-}
-inline void MallocStartupUsed( size_t size )
-{
-	size = ( size + 0xF )&~0xF;	// round up to a multiple of 16 bytes
-	g_ps3_malloc_startup_index += size;
-	
-	if ( g_ps3_malloc_startup_index > sizeof( g_ps3_malloc_startup_buffer ) )
-		abort();
-}
-inline bool IsMallocStartupAllocation( void *p )
-{
-	return ( p >= g_ps3_malloc_startup_buffer ) && ( p < &g_ps3_malloc_startup_buffer[ g_ps3_malloc_startup_index ] );
-}
-inline size_t GetMallocStartupAllocationSize( void *p )
-{
-	char *pCh = ( char * ) p;
-	pCh -= 16;
-	size_t *pSize = reinterpret_cast< size_t * >( pCh );
-	return *pSize;
-}
-
-MemOverrideRawCrtFunctions_t * GetRawCrtFunctions();
-SteamPS3Memory_t *GetSteamMemoryFunctions();
-
-_C_STD_BEGIN
-extern "C" {
-
-void WRAP_FN_REAL(abort)(void);
-void WRAP_FN_HOOK(abort)(void)
-{
-#ifndef _CERT
-	DebuggerBreak();
-#endif
-
-	WRAP_FN_REAL(abort)();
-}
-
-void * WRAP_FN_REAL(malloc)( size_t size );
-void * WRAP_FN_HOOK(malloc)( size_t size )
-{
-	if ( g_pMemAlloc )
-	{
-		return g_pMemAlloc->Alloc( size );
-	}
-	else
-	{
-		size_t *pSize = (size_t*) MallocStartupBuffer();
-		*pSize = size;
-		MallocStartupUsed( sizeof( size_t ) );
-
-		void *pvResult = MallocStartupBuffer();
-		MallocStartupUsed( size );
-		return pvResult;
-	}
-}
-
-void * WRAP_FN_REAL(calloc)( size_t nelem, size_t size );
-void * WRAP_FN_HOOK(calloc)( size_t nelem, size_t size )
-{
-	void *p = g_pMemAlloc ? g_pMemAlloc->Alloc( nelem * size ) : malloc( nelem * size );
-	memset( p, 0, nelem * size );
-	return p;
-}
-
-void * WRAP_FN_REAL(memalign)(size_t boundary, size_t size_arg);
-void * WRAP_FN_HOOK(memalign)(size_t boundary, size_t size_arg)
-{
-	if ( g_pMemAlloc )
-	{
-		void * p = g_pMemAlloc->AllocAlign( size_arg, boundary );
-		Assert( 0 == ( reinterpret_cast< size_t >( p ) % boundary ) );
-		return p;
-	}
-	else
-	{
-		return malloc( size_arg );
-	}
-}
-
-void * WRAP_FN_REAL(realloc)( void *p, size_t size_arg );
-void * WRAP_FN_HOOK(realloc)( void *p, size_t size_arg )
-{
-	if ( !IsMallocStartupAllocation( p ) && g_pMemAlloc )
-	{
-		return g_pMemAlloc->Realloc( p, size_arg );
-	}
-	else
-	{
-		void *pNewData = malloc( size_arg );
-		size_t nOldSize = GetMallocStartupAllocationSize( p );
-		memcpy( pNewData, p, nOldSize < size_arg ? nOldSize : size_arg );
-		free( p );
-		return pNewData;
-	}
-}
-
-void * WRAP_FN_REAL(reallocalign)(void *p, size_t size_arg, size_t boundary);
-void * WRAP_FN_HOOK(reallocalign)(void *p, size_t size_arg, size_t boundary)
-{
-	if ( !IsMallocStartupAllocation( p ) && g_pMemAlloc )
-	{
-		p = g_pMemAlloc->ReallocAlign( p, size_arg, boundary );
-		Assert( 0 == ( reinterpret_cast< size_t >( p ) % boundary ) );
-		return p;
-	}
-	else
-	{
-		void *pNewData = memalign( boundary, size_arg );
-		size_t nOldSize = GetMallocStartupAllocationSize( p );
-		memcpy( pNewData, p, nOldSize < size_arg ? nOldSize : size_arg );
-		free( p );
-		return pNewData;
-	}
-}
-
-size_t WRAP_FN_REAL(malloc_usable_size)( void *p );
-size_t WRAP_FN_HOOK(malloc_usable_size)( void *p )
-{
-	if ( !IsMallocStartupAllocation( p ) && g_pMemAlloc )
-		return g_pMemAlloc->GetSize( p );
-	return GetMallocStartupAllocationSize( p );
-}
-
-int WRAP_FN_REAL(malloc_stats)(struct malloc_managed_size *mms);
-int WRAP_FN_HOOK(malloc_stats)(struct malloc_managed_size *mms)
-{
-	if ( mms &&
-		 mms->current_inuse_size == 0x12345678 &&
-		 mms->current_system_size == 0x09ABCDEF )
-	{
-		// This is our passthrough function to establish
-		// real memalloc interface from tier0
-		g_pMemAlloc = reinterpret_cast< IMemAlloc * >( mms->max_system_size );
-		return reinterpret_cast<int>( GetRawCrtFunctions() );
-	}
-
-	if ( mms &&
-		mms->current_inuse_size == STEAMPS3_MALLOC_INUSE &&
-		mms->current_system_size == STEAMPS3_MALLOC_SYSTEM )
-	{
-		// Steam is requesting memory struct
-		mms->current_inuse_size = STEAMPS3_MALLOC_OK;
-		return reinterpret_cast<int>( GetSteamMemoryFunctions() );
-	}
-
-	memset( mms, 0, sizeof( *mms ) );
-	return 0;
-}
-
-void WRAP_FN_REAL(free)( void *p );
-void WRAP_FN_HOOK(free)( void *p )
-{
-	if ( !IsMallocStartupAllocation( p ) && g_pMemAlloc )
-		g_pMemAlloc->Free( p );
-}
-
-}
-_C_STD_END
-
-MemOverrideRawCrtFunctions_t * GetRawCrtFunctions()
-{
-	using namespace std;
-
-	static MemOverrideRawCrtFunctions_t g_rawfns =
-	{
-		WRAP_FN_REAL( malloc ),
-		WRAP_FN_REAL( calloc ),
-		WRAP_FN_REAL( memalign ),
-		WRAP_FN_REAL( realloc ),
-		WRAP_FN_REAL( reallocalign ),
-		WRAP_FN_REAL( malloc_usable_size ),
-		WRAP_FN_REAL( malloc_stats ),
-		WRAP_FN_REAL( free )
-	};
-
-	return &g_rawfns;
-}
-
-SteamPS3Memory_t *GetSteamMemoryFunctions()
-{
-	using namespace std;
-
-	static SteamPS3Memory_t g_steamPS3Memory =
-	{
-#if defined( STEAM_SHARES_GAME_ALLOCATOR )
-		false,								// false=[Steam and game share the tier0 memory allocator]
-#else 
-		true,								// true=[Steam manages 6Mb chunk, allocated from the game on startup]
-#endif
-		WRAP_FN_HOOK( malloc ),
-		WRAP_FN_HOOK( realloc ),
-		WRAP_FN_HOOK( free ),
-		WRAP_FN_HOOK( malloc_usable_size )
-	};
-
-	return &g_steamPS3Memory;
-}
-
-#elif !defined( TIER0_DLL_EXPORT )
-/*
-	=========   PS3 SECTION FOR ALL MODULES EXCEPT TIER0 ==================
-*/
-
-#include "tier0/dbg.h"
-#include "tier0/memalloc.h"
-
-#if (defined(_DEBUG) || defined(USE_MEM_DEBUG))
-void *operator new( unsigned int nSize, int nBlockUse_UNUSED, const char *pFileName, int nLine )
-{
-	return MemAlloc_Alloc( nSize, pFileName, nLine );
-}
-
-void *operator new[] ( unsigned int nSize, int nBlockUse_UNUSED, const char *pFileName, int nLine )
-{
-	return MemAlloc_Alloc( nSize, pFileName, nLine );
-}
-#endif
-
-#endif // PS3MEMOVERRIDEWRAP
-
-#else
 
 #if !defined(STEAM) && !defined(NO_MALLOC_OVERRIDE)
 #define AVOID_INCLUDING_ALGORITHM
 
-#undef PROTECTED_THINGS_ENABLE   // allow use of _vsnprintf
-
-#include <stdlib.h>
-#include "platform.h"
-inline void __cdecl VPurecallHandler()
-{
-	DebuggerBreakIfDebugging();	// give the debugger a chance to catch first
-	Plat_FatalError("VPurecallHandler()\n");
-}
-
-#include "winlite.h"
-
 #if defined( _WIN32 ) && !defined( _X360 )
-// set Windows pure virtual handler
-_purecall_handler OldPurecallHandler = _set_purecall_handler( VPurecallHandler );
-#elif defined( POSIX ) && !defined( _PS3 )
-// set OSX/Linux pure virtual handler
-extern "C" void __cxa_pure_virtual() { VPurecallHandler(); }
+#define WIN_32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 #include "tier0/dbg.h"
@@ -385,32 +39,28 @@ extern "C" void __cxa_pure_virtual() { VPurecallHandler(); }
 #define __cdecl
 #endif
 
-#if defined(USE_MEM_DEBUG)
-#ifdef _MSC_VER
+#if defined(USE_LIGHT_MEM_DEBUG) || defined(USE_MEM_DEBUG)
 #pragma optimize( "", off )
-#endif
 #define inline
 #endif
 
-const char* GetModuleName()
-{
-	static char szModule[MAX_PATH]{};
-	if (szModule[0] == '\0') Plat_GetModuleFilename(szModule, sizeof(szModule));
-	return szModule;
-}
-
+const char *g_pszModule = MKSTRING( MEMOVERRIDE_MODULE );
 inline void *AllocUnattributed( size_t nSize )
 {
 #if !defined(USE_LIGHT_MEM_DEBUG) && !defined(USE_MEM_DEBUG)
 	return MemAlloc_Alloc(nSize);
 #else
-	return MemAlloc_Alloc(nSize, ::GetModuleName(), 0);
+	return MemAlloc_Alloc(nSize, g_pszModule, 0);
 #endif
 }
 
 inline void *ReallocUnattributed( void *pMem, size_t nSize )
 {
+#if !defined(USE_LIGHT_MEM_DEBUG) && !defined(USE_MEM_DEBUG)
 	return g_pMemAlloc->Realloc(pMem, nSize);
+#else
+	return g_pMemAlloc->Realloc(pMem, nSize, g_pszModule, 0);
+#endif
 }
 
 #undef inline
@@ -419,14 +69,17 @@ inline void *ReallocUnattributed( void *pMem, size_t nSize )
 //-----------------------------------------------------------------------------
 // Standard functions in the CRT that we're going to override to call our allocator
 //-----------------------------------------------------------------------------
-#if !defined(_STATIC_LINKED)
-
+#if defined(_WIN32) && !defined(_STATIC_LINKED)
 // this magic only works under win32
 // under linux this malloc() overrides the libc malloc() and so we
 // end up in a recursion (as MemAlloc_Alloc() calls malloc)
 #if _MSC_VER >= 1400
 
 #if _MSC_VER >= 1900
+#ifndef _CRT_NOEXCEPT
+#define _CRT_NOEXCEPT
+#endif
+
 #define _CRTNOALIAS
 #endif
 
@@ -437,7 +90,6 @@ inline void *ReallocUnattributed( void *pMem, size_t nSize )
 #define FREE_CALL
 #endif
 
-#if 0
 extern "C"
 {
 	
@@ -448,7 +100,11 @@ ALLOC_CALL void *malloc( size_t nSize )
 
 FREE_CALL void free( void *pMem )
 {
+#if !defined(USE_LIGHT_MEM_DEBUG) && !defined(USE_MEM_DEBUG)
 	g_pMemAlloc->Free(pMem);
+#else
+	g_pMemAlloc->Free(pMem, g_pszModule, 0 );
+#endif
 }
 
 ALLOC_CALL void *realloc( void *pMem, size_t nSize )
@@ -464,7 +120,6 @@ ALLOC_CALL void *calloc( size_t nCount, size_t nElementSize )
 }
 
 } // end extern "C"
-#endif
 
 //-----------------------------------------------------------------------------
 // Non-standard MSVC functions that we're going to override to call our allocator
@@ -488,14 +143,14 @@ void *_malloc_base( size_t nSize )
 #if ( defined ( _MSC_VER ) && _MSC_VER >= 1900 )
 _CRTRESTRICT void *_calloc_base(size_t nCount, size_t nSize)
 {
-	void *pMem = AllocUnattributed(nCount*nSize);
-	memset(pMem, 0, nCount*nSize);
+	void *pMem = AllocUnattributed(nCount * nSize);
+	memset(pMem, 0, nCount * nSize);
 	return pMem;
 }
 #else
-void *_calloc_base( size_t nSize )
+void *_calloc_base(size_t nSize)
 {
-	void *pMem = AllocUnattributed( nSize );
+	void *pMem = AllocUnattributed(nSize);
 	memset(pMem, 0, nSize);
 	return pMem;
 }
@@ -506,19 +161,36 @@ void *_realloc_base( void *pMem, size_t nSize )
 	return ReallocUnattributed( pMem, nSize );
 }
 
+#if 0
+// AMNOTE: Disabled due to causing issues/crashes on library unload, direct cause is unknown
+// but _recalloc_base by itself calls to _realloc_base which we also override above
+// thus still preserving the memory allocation to the game's allocator.
+// As a side note _msize_base is also called from it, so now it should be also maintained!
+
+#if ( defined ( _MSC_VER ) && _MSC_VER >= 1900 )
 void *_recalloc_base( void *pMem, size_t nCount, size_t nSize )
 {
-	void *pMemOut = ReallocUnattributed( pMem, nCount*nSize );
-	if (!pMem)
-	{
-		memset(pMemOut, 0, nCount*nSize);
-	}
+	void *pMemOut = ReallocUnattributed( pMem, nCount * nSize );
+	memset(pMemOut, 0, nCount * nSize);
 	return pMemOut;
 }
+#else
+void *_recalloc_base(void *pMem, size_t nSize)
+{
+	void *pMemOut = ReallocUnattributed(pMem, nSize);
+	memset(pMemOut, 0, nSize);
+	return pMemOut;
+}
+#endif
+#endif
 
 void _free_base( void *pMem )
 {
+#if !defined(USE_LIGHT_MEM_DEBUG) && !defined(USE_MEM_DEBUG)
 	g_pMemAlloc->Free(pMem);
+#else
+	g_pMemAlloc->Free(pMem, g_pszModule, 0 );
+#endif
 }
 
 void *__cdecl _expand_base( void *pMem, size_t nNewSize, int nBlockUse )
@@ -538,7 +210,7 @@ void * __cdecl _calloc_crt(size_t count, size_t size)
 #if (defined( _MSC_VER ) && _MSC_VER >= 1900)
 	return _calloc_base(count, size);
 #else
-	return _calloc_base( count * size );
+	return _calloc_base(count * size);
 #endif
 }
 
@@ -549,7 +221,12 @@ void * __cdecl _realloc_crt(void *ptr, size_t size)
 
 void * __cdecl _recalloc_crt(void *ptr, size_t count, size_t size)
 {
-	return _recalloc_base( ptr, count, size );
+#if (defined( _MSC_VER ) && _MSC_VER >= 1900)
+	return _recalloc_base(ptr, count, size);
+#else
+	return _recalloc_base(ptr, size * count);
+#endif
+	
 }
 
 #if 0
@@ -558,25 +235,27 @@ void * __cdecl _recalloc_crt(void *ptr, size_t count, size_t size)
 ALLOC_CALL void * __cdecl _recalloc ( void * memblock, size_t count, size_t size )
 {
 	void *pMem = ReallocUnattributed( memblock, size * count );
-	if (!memblock)
-	{
-		memset(pMem, 0, size * count);
-	}
+	memset( pMem, 0, size * count );
 	return pMem;
 }
 #endif
 
-/**
-size_t _msize_base( void *pMem )
+#if ( defined ( _MSC_VER ) && _MSC_VER >= 1900 )
+size_t _msize_base( void *pMem ) _CRT_NOEXCEPT
 {
 	return g_pMemAlloc->GetSize(pMem);
 }
+#else
+size_t _msize_base(void *pMem) _CRT_NOEXCEPT
+{
+	return g_pMemAlloc->GetSize(pMem);
+}
+#endif
 
 size_t _msize( void *pMem )
 {
 	return _msize_base(pMem);
 }
-*/
 
 size_t msize( void *pMem )
 {
@@ -646,7 +325,7 @@ size_t __cdecl _heapused( size_t *, size_t * )
 }
 
 #ifdef _WIN32
-// #include <malloc.h>
+#include <malloc.h>
 int __cdecl _heapwalk( _HEAPINFO * )
 {
 	return 0;
@@ -672,14 +351,12 @@ void *malloc_db( size_t nSize, const char *pFileName, int nLine )
 
 void free_db( void *pMem, const char *pFileName, int nLine )
 {
-	// g_pMemAlloc->Free2(pMem, pFileName, nLine);
-	g_pMemAlloc->Free(pMem);
+	g_pMemAlloc->Free(pMem/*, pFileName, nLine*/);
 }
 
 void *realloc_db( void *pMem, size_t nSize, const char *pFileName, int nLine )
 {
-	// return g_pMemAlloc->Realloc2(pMem, nSize, pFileName, nLine);
-	return g_pMemAlloc->Realloc(pMem, nSize);
+	return g_pMemAlloc->Realloc(pMem, nSize/*, pFileName, nLine*/);
 }
 	
 } // end extern "C"
@@ -710,83 +387,43 @@ extern "C"
 // ensures they are here even when linking against debug or release static libs
 //-----------------------------------------------------------------------------
 #ifndef NO_MEMOVERRIDE_NEW_DELETE
-
-// ==== operator new (may return nullptr) ====
-void* operator new(size_t size)
+void *__cdecl operator new( size_t nSize )
 {
-	return AllocUnattributed(size);
+	return AllocUnattributed( nSize );
 }
 
-void* operator new[](size_t size)
+void *__cdecl operator new( size_t nSize, int nBlockUse, const char *pFileName, int nLine )
 {
-	return AllocUnattributed(size);
+	return MemAlloc_Alloc(nSize, pFileName, nLine );
 }
 
-// ==== operator new (nothrow overloads are noexcept) ====
-void* operator new(size_t size, const std::nothrow_t&) noexcept
+void __cdecl operator delete( void *pMem ) noexcept
 {
-	return AllocUnattributed(size);
+#if !defined(USE_LIGHT_MEM_DEBUG) && !defined(USE_MEM_DEBUG)
+	g_pMemAlloc->Free(pMem);
+#else
+	g_pMemAlloc->Free(pMem, g_pszModule, 0 );
+#endif
 }
 
-void* operator new[](size_t size, const std::nothrow_t&) noexcept
+void *__cdecl operator new[] ( size_t nSize )
 {
-	return AllocUnattributed(size);
+	return AllocUnattributed( nSize );
 }
 
-// ==== operator delete (must be noexcept) ====
-void operator delete(void* ptr) noexcept
+void *__cdecl operator new[] ( size_t nSize, int nBlockUse, const char *pFileName, int nLine )
 {
-	if (ptr) g_pMemAlloc->Free(ptr);
+	return MemAlloc_Alloc(nSize, pFileName, nLine);
 }
 
-void operator delete[](void* ptr) noexcept
+void __cdecl operator delete[] ( void *pMem ) noexcept
 {
-	if (ptr) g_pMemAlloc->Free(ptr);
+#if !defined(USE_LIGHT_MEM_DEBUG) && !defined(USE_MEM_DEBUG)
+	g_pMemAlloc->Free(pMem);
+#else
+	g_pMemAlloc->Free(pMem, g_pszModule, 0 );
+#endif
 }
-
-// ==== sized delete (must be noexcept) ====
-void operator delete(void* ptr, size_t) noexcept
-{
-	if (ptr) g_pMemAlloc->Free(ptr);
-}
-
-void operator delete[](void* ptr, size_t) noexcept
-{
-	if (ptr) g_pMemAlloc->Free(ptr);
-}
-
-// ==== aligned new/delete (aligned new can throw, so not noexcept) ====
-void* operator new(size_t size, std::align_val_t)
-{
-	return AllocUnattributed(size);
-}
-
-void* operator new[](size_t size, std::align_val_t)
-{
-	return AllocUnattributed(size);
-}
-
-// ==== aligned delete (must be noexcept) ====
-void operator delete(void* ptr, std::align_val_t) noexcept
-{
-	if (ptr) g_pMemAlloc->Free(ptr);
-}
-
-void operator delete[](void* ptr, std::align_val_t) noexcept
-{
-	if (ptr) g_pMemAlloc->Free(ptr);
-}
-
-void operator delete(void* ptr, size_t, std::align_val_t) noexcept
-{
-	if (ptr) g_pMemAlloc->Free(ptr);
-}
-
-void operator delete[](void* ptr, size_t, std::align_val_t) noexcept
-{
-	if (ptr) g_pMemAlloc->Free(ptr);
-}
-
 #endif
 
 
@@ -823,7 +460,7 @@ public:
 	{
 		if(m_nBlockUse == _CRT_BLOCK)
 		{
-			MemAlloc_PopAllocDbgInfo();
+			g_pMemAlloc->PopAllocDbgInfo();
 		}
 	}
 
@@ -857,9 +494,7 @@ void *__cdecl _malloc_dbg( size_t nSize, int nBlockUse,
 	return MemAlloc_Alloc(nSize, pFileName, nLine);
 }
 
-#ifndef _WIN32
-
-#if ( defined(_MSC_VER) && ( _MSC_VER >= 1600 ) ) || defined( _X360 )
+#if defined( _X360 )
 void *__cdecl _calloc_dbg_impl( size_t nNum, size_t nSize, int nBlockUse, 
 								const char * szFileName, int nLine, int * errno_tmp )
 {
@@ -876,14 +511,11 @@ void *__cdecl _calloc_dbg( size_t nNum, size_t nSize, int nBlockUse,
 	return pMem;
 }
 
-#endif
-
 void *__cdecl _realloc_dbg( void *pMem, size_t nNewSize, int nBlockUse,
 							const char *pFileName, int nLine )
 {
 	AttribIfCrt();
-	// return g_pMemAlloc->Realloc2(pMem, nNewSize, pFileName, nLine);
-	return g_pMemAlloc->Realloc(pMem, nNewSize);
+	return g_pMemAlloc->Realloc(pMem, nNewSize/*, pFileName, nLine*/);
 }
 
 void *__cdecl _expand_dbg( void *pMem, size_t nNewSize, int nBlockUse,
@@ -896,14 +528,18 @@ void *__cdecl _expand_dbg( void *pMem, size_t nNewSize, int nBlockUse,
 void __cdecl _free_dbg( void *pMem, int nBlockUse )
 {
 	AttribIfCrt();
+#if !defined(USE_LIGHT_MEM_DEBUG) && !defined(USE_MEM_DEBUG)
 	g_pMemAlloc->Free(pMem);
+#else
+	g_pMemAlloc->Free(pMem, g_pszModule, 0 );
+#endif
 }
 
 size_t __cdecl _msize_dbg( void *pMem, int nBlockUse )
 {
 #ifdef _WIN32
 	return _msize(pMem);
-#elif POSIX || _PS3
+#elif POSIX
 	Assert( "_msize_dbg unsupported" );
 	return 0;
 #endif
@@ -1027,9 +663,7 @@ int _CrtSetDbgFlag( int nNewFlag )
 #define AFNAME(var) __p_ ## var
 #define AFRET(var)  &var
 
-#if ( defined( _MSC_VER ) && _MSC_VER >= 1900)
-//Do we need to do anything here for VS2015?
-#else
+#if !( defined( _MSC_VER ) && _MSC_VER >= 1900)
 int _crtDbgFlag = _CRTDBG_ALLOC_MEM_DF;
 int* AFNAME(_crtDbgFlag)(void)
 {
@@ -1127,8 +761,6 @@ _CRT_REPORT_HOOK __cdecl _CrtSetReportHook( _CRT_REPORT_HOOK pfnNewHook )
 	return NULL;
 }
 
-#if false
-
 int __cdecl _CrtDbgReport( int nRptType, const char * szFile,
         int nLine, const char * szModule, const char * szFormat, ... )
 {
@@ -1140,8 +772,6 @@ int __cdecl _CrtDbgReport( int nRptType, const char * szFile,
 
 	return 0;
 }
-
-#endif
 
 #if _MSC_VER >= 1400
 
@@ -1155,7 +785,7 @@ void __cdecl _invalid_parameter_noinfo(void)
 
 #endif /* defined( _DEBUG ) */
 
-#if !defined( _WIN32 ) && ( defined( _DEBUG ) || defined( USE_MEM_DEBUG ) )
+#if defined( _DEBUG ) || defined( USE_MEM_DEBUG )
 
 int __cdecl __crtMessageWindowW( int nRptType, const wchar_t * szFile, const wchar_t * szLine,
 								 const wchar_t * szModule, const wchar_t * szUserMessage )
@@ -1179,15 +809,15 @@ int __cdecl _CrtDbgReportW( int nRptType, const wchar_t *szFile, int nLine,
 }
 
 #if ( defined(_MSC_VER) && _MSC_VER >= 1900)
-int __cdecl _VCrtDbgReportA(int nRptType, void *pReturnAddr, const char* szFile, int nLine,
-                            const char *szModule, const char *szFormat, va_list arglist)
+int __cdecl _VCrtDbgReportA(int nRptType, void *pReturnAddr, const char *szFile, int nLine,
+							const char *szModule, const char *szFormat, va_list arglist)
 {
 	Assert(0);
 	return 0;
 }
 #else
-int __cdecl _VCrtDbgReportA( int nRptType, const wchar_t * szFile, int nLine, 
-							 const wchar_t * szModule, const wchar_t * szFormat, va_list arglist )
+int __cdecl _VCrtDbgReportA(int nRptType, const wchar_t *szFile, int nLine,
+							const wchar_t *szModule, const wchar_t *szFormat, va_list arglist)
 {
 	Assert(0);
 	return 0;
@@ -1201,7 +831,7 @@ int __cdecl _CrtSetReportHook2( int mode, _CRT_REPORT_HOOK pfnNewHook )
 }
  
 
-#endif  /* !defined( _WIN32 ) && ( defined( _DEBUG ) || defined( USE_MEM_DEBUG ) ) */
+#endif  /* defined( _DEBUG ) || defined( USE_MEM_DEBUG ) */
 
 extern "C" int __crtDebugCheckCount = FALSE;
 
@@ -1221,11 +851,7 @@ extern "C" void * __cdecl _aligned_offset_recalloc_dbg( void * memblock, size_t 
 {
 	Assert( IsPC() || 0 );
 	void *pMem = ReallocUnattributed( memblock, size * count );
-	if (!memblock)
-	{
-		memset(pMem, 0, size * count);
-	}
-
+	memset( pMem, 0, size * count );
 	return pMem;
 }
 
@@ -1368,13 +994,25 @@ void __cdecl _aligned_free_dbg( void * memblock)
     _aligned_free(memblock);
 }
 
-#if _MSC_VER < 1900
+#if 0
 size_t __cdecl _CrtSetDebugFillThreshold( size_t _NewDebugFillThreshold)
 {
 	Assert(0);
     return 0;
 }
 #endif
+
+//===========================================
+// NEW!!! 64-bit
+
+char * __cdecl _strdup ( const char * string )
+{
+	int nSize = (int)strlen(string) + 1;
+	char *pCopy = (char*)AllocUnattributed( nSize );
+	if ( pCopy )
+		memcpy( pCopy, string, nSize );
+	return pCopy;
+}
 
 #if 0
 _TSCHAR * __cdecl _tfullpath_dbg ( _TSCHAR *UserBuf, const _TSCHAR *path, size_t maxlen, int nBlockUse, const char * szFileName, int nLine )
@@ -1424,6 +1062,7 @@ _TSCHAR * __cdecl _ttempnam ( const _TSCHAR *dir, const _TSCHAR *pfx )
 	Assert(0);
 	return 0;
 }
+#endif
 
 wchar_t * __cdecl _wcsdup_dbg ( const wchar_t * string, int nBlockUse, const char * szFileName, int nLine )
 {
@@ -1436,7 +1075,7 @@ wchar_t * __cdecl _wcsdup ( const wchar_t * string )
 	Assert(0);
 	return 0;
 }
-#endif
+
 } // end extern "C"
 
 #if _MSC_VER >= 1400
@@ -1505,7 +1144,7 @@ LPVOID WINAPI XMemAlloc( SIZE_T dwSize, DWORD dwAllocAttributes )
 #if !defined(USE_LIGHT_MEM_DEBUG) && !defined(USE_MEM_DEBUG)
 			ptr = MemAlloc_Alloc( dwSize );
 #else
-			ptr = MemAlloc_Alloc(dwSize, ::GetModuleName(), 0);
+			ptr = MemAlloc_Alloc(dwSize, g_pszModule, 0);
 #endif
 			break;
 		case XALLOC_ALIGNMENT_8:
@@ -1556,7 +1195,7 @@ VOID WINAPI XMemFree( PVOID pAddress, DWORD dwAllocAttributes )
 #if !defined(USE_LIGHT_MEM_DEBUG) && !defined(USE_MEM_DEBUG)
 			return g_pMemAlloc->Free( pAddress );
 #else
-			return g_pMemAlloc->Free( pAddress, ::GetModuleName(), 0 );
+			return g_pMemAlloc->Free( pAddress, g_pszModule, 0 );
 #endif
 		default:
 			return MemAlloc_FreeAligned( pAddress );
@@ -1599,136 +1238,8 @@ SIZE_T WINAPI XMemSize( PVOID pAddress, DWORD dwAllocAttributes )
 #define MAX_MODIFIER_LEN    0   /* max modifier name length - n/a */
 #define MAX_LC_LEN          (MAX_LANG_LEN+MAX_CTRY_LEN+MAX_MODIFIER_LEN+3)
 
-#if _MSC_VER >= 1700 // VS 11 (VS 2012)
-// Copied from C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\crt\src\mtdll.h
-#ifndef _SETLOC_STRUCT_DEFINED
-struct _is_ctype_compatible {
-        unsigned long id;
-        int is_clike;
-};
-
-typedef struct setloc_struct {
-    /* getqloc static variables */
-    wchar_t *pchLanguage;
-    wchar_t *pchCountry;
-    int iLocState;
-    int iPrimaryLen;
-    BOOL bAbbrevLanguage;
-    BOOL bAbbrevCountry;
-    UINT        _cachecp;
-    wchar_t     _cachein[MAX_LC_LEN];
-    wchar_t     _cacheout[MAX_LC_LEN];
-    /* _setlocale_set_cat (LC_CTYPE) static variable */
-    struct _is_ctype_compatible _Loc_c[5];
-    wchar_t _cacheLocaleName[LOCALE_NAME_MAX_LENGTH];
-} _setloc_struct, *_psetloc_struct;
-#define _SETLOC_STRUCT_DEFINED
-#endif  /* _SETLOC_STRUCT_DEFINED */
-
-_CRTIMP extern unsigned long __cdecl __threadid(void);
-#define _threadid   (__threadid())
-_CRTIMP extern uintptr_t __cdecl __threadhandle(void);
-#define _threadhandle   (__threadhandle())
-
-/* Structure for each thread's data */
-
-struct _tiddata {
-    unsigned long   _tid;       /* thread ID */
-
-
-    uintptr_t _thandle;         /* thread handle */
-
-    int     _terrno;            /* errno value */
-    unsigned long   _tdoserrno; /* _doserrno value */
-    unsigned int    _fpds;      /* Floating Point data segment */
-    unsigned long   _holdrand;  /* rand() seed value */
-    char *      _token;         /* ptr to strtok() token */
-    wchar_t *   _wtoken;        /* ptr to wcstok() token */
-    unsigned char * _mtoken;    /* ptr to _mbstok() token */
-
-    /* following pointers get malloc'd at runtime */
-    char *      _errmsg;        /* ptr to strerror()/_strerror() buff */
-    wchar_t *   _werrmsg;       /* ptr to _wcserror()/__wcserror() buff */
-    char *      _namebuf0;      /* ptr to tmpnam() buffer */
-    wchar_t *   _wnamebuf0;     /* ptr to _wtmpnam() buffer */
-    char *      _namebuf1;      /* ptr to tmpfile() buffer */
-    wchar_t *   _wnamebuf1;     /* ptr to _wtmpfile() buffer */
-    char *      _asctimebuf;    /* ptr to asctime() buffer */
-    wchar_t *   _wasctimebuf;   /* ptr to _wasctime() buffer */
-    void *      _gmtimebuf;     /* ptr to gmtime() structure */
-    char *      _cvtbuf;        /* ptr to ecvt()/fcvt buffer */
-    unsigned char _con_ch_buf[MB_LEN_MAX];
-                                /* ptr to putch() buffer */
-    unsigned short _ch_buf_used;   /* if the _con_ch_buf is used */
-
-    /* following fields are needed by _beginthread code */
-    void *      _initaddr;      /* initial user thread address */
-    void *      _initarg;       /* initial user thread argument */
-
-    /* following three fields are needed to support signal handling and
-     * runtime errors */
-    void *      _pxcptacttab;   /* ptr to exception-action table */
-    void *      _tpxcptinfoptrs; /* ptr to exception info pointers */
-    int         _tfpecode;      /* float point exception code */
-
-#if ( defined( _MSC_VER ) && _MSC_VER >= 1900)
-	void *ptmbcinfo_dummy;
-	void *ptlocinfo_dummy;
-#else
-    /* pointer to the copy of the multibyte character information used by
-     * the thread */
-    pthreadmbcinfo  ptmbcinfo;
-
-    /* pointer to the copy of the locale informaton used by the thead */
-    pthreadlocinfo  ptlocinfo;
-#endif
-
-    int         _ownlocale;     /* if 1, this thread owns its own locale */
-
-    /* following field is needed by NLG routines */
-    unsigned long   _NLG_dwCode;
-
-    /*
-     * Per-Thread data needed by C++ Exception Handling
-     */
-    void *      _terminate;     /* terminate() routine */
-    void *      _unexpected;    /* unexpected() routine */
-    void *      _translator;    /* S.E. translator */
-    void *      _purecall;      /* called when pure virtual happens */
-    void *      _curexception;  /* current exception */
-    void *      _curcontext;    /* current exception context */
-    int         _ProcessingThrow; /* for uncaught_exception */
-    void *      _curexcspec;    /* for handling exceptions thrown from std::unexpected */
-#if defined (_M_X64) || defined (_M_ARM)
-    void *      _pExitContext;
-    void *      _pUnwindContext;
-    void *      _pFrameInfoChain;
-#if defined (_WIN64)
-    unsigned __int64    _ImageBase;
-    unsigned __int64    _ThrowImageBase;
-#else  /* defined (_WIN64) */
-    unsigned __int32    _ImageBase;
-    unsigned __int32    _ThrowImageBase;
-#endif  /* defined (_WIN64) */
-    void *      _pForeignException;
-#elif defined (_M_IX86)
-    void *      _pFrameInfoChain;
-#endif  /* defined (_M_IX86) */
-    _setloc_struct _setloc_data;
-
-    void *      _reserved1;     /* nothing */
-    void *      _reserved2;     /* nothing */
-    void *      _reserved3;     /* nothing */
-#ifdef _M_IX86
-    void *      _reserved4;     /* nothing */
-    void *      _reserved5;     /* nothing */
-#endif  /* _M_IX86 */
-
-    int _cxxReThrow;        /* Set to True if it's a rethrown C++ Exception */
-
-    unsigned long __initDomain;     /* initial domain used by _beginthread[ex] for managed function */
-};
-#else // _MSC_VER >= 1700 // VS 11 (VS 2012)
+#if 0
+// GAMMACASE: Disabled due to being too outdated
 struct _is_ctype_compatible {
         unsigned long id;
         int is_clike;
@@ -1839,13 +1350,9 @@ struct _tiddata {
 
     unsigned long __initDomain;     /* initial domain used by _beginthread[ex] for managed function */
 };
-#endif // _MSC_VER >= 1700 // VS 11 (VS 2012)
 
 typedef struct _tiddata * _ptiddata;
 
-#if (defined( _MSC_VER ) && _MSC_VER >= 1900)
-//Do we need anything in here?
-#else
 class _LocaleUpdate
 {
     _locale_tstruct localeinfo;
@@ -1886,7 +1393,7 @@ class _LocaleUpdate
         return &localeinfo;
     }
 };
-#endif //_MSC_VER
+#endif
 
 #pragma warning(push)
 #pragma warning(disable: 4483)
@@ -1952,6 +1459,3 @@ namespace _NATIVE_STARTUP_NAMESPACE
 #endif // !STEAM && !NO_MALLOC_OVERRIDE
 
 #endif // _WIN32
-
-
-#endif // _PS3

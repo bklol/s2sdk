@@ -12,21 +12,21 @@
 #pragma once
 #endif
 
-#include "appframework/iappsystem.h"
+#include "appframework/IAppSystem.h"
 #include "tier1/convar.h"
 
 //-----------------------------------------------------------------------------
 // Forward declarations
 //-----------------------------------------------------------------------------
 
-struct ResourceManifestDesc_t;
 
 //-----------------------------------------------------------------------------
 // Call this to connect to/disconnect from all tier 1 libraries.
 // It's up to the caller to check the globals it cares about to see if ones are missing
 //-----------------------------------------------------------------------------
-void ConnectTier1Libraries( CreateInterfaceFn *pFactoryList, int nFactoryCount );
-void DisconnectTier1Libraries();
+inline void ConnectTier1Libraries( CreateInterfaceFn *pFactoryList, int nFactoryCount ) { ConnectInterfaces( pFactoryList, nFactoryCount ); }
+inline void DisconnectTier1Libraries() { DisconnectInterfaces(); }
+
 
 //-----------------------------------------------------------------------------
 // Helper empty implementation of an IAppSystem for tier2 libraries
@@ -80,23 +80,6 @@ public:
 	}
 };
 
-class CTier1AppSystemDict : public CAppSystemDict
-{
-public:
-	bool m_bNoExeCheck;
-	int m_nUnk;
-	CBufferString unk;
-	CBufferString unk1;
-	char m_unnk[192];
-	CBufferString unk2;
-	char m_unnk1[218];
-};
-
-class CTier1Application : public CTier1AppSystem< IApplication >
-{
-public:
-	virtual ~CTier1Application() = default;
-};
 
 #endif // TIER1_H
 

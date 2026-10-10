@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //						FastDelegate.h 
 //	Efficient delegates in C++ that generate only two lines of asm code!
 //  Documentation is found at http://www.codeproject.com/cpp/FastDelegate.asp
@@ -49,14 +50,11 @@
 
 #ifndef UTLDELEGATEIMPL_H
 #define UTLDELEGATEIMPL_H
+#if _MSC_VER > 1000
 #pragma once
+#endif // _MSC_VER > 1000
 
-#include "tier0/platform.h"
-
-// use #pragma warning push/pop to contain the pragmas in utldelegateimpl so they don't spill out into other code.
-#ifdef _MSC_VER
-#pragma warning( push ) 
-#endif
+#include <memory.h> // to allow <,> comparisons
 
 ////////////////////////////////////////////////////////////////////////////////
 //						Configuration options
@@ -345,11 +343,6 @@ struct SimplifyMemFunc<SINGLE_MEMFUNCPTR_SIZE>
 
 // __multiple_inheritance classes go here
 // Nasty hack for Microsoft and Intel (IA32 and Itanium)
-
-// The size of __multiple_inheritance + __virtual_inheritance are the same on MSVC64
-// We can use the __virtual_inheritance code for multiple_inheritance, though, so let's do that!
-#ifndef COMPILER_MSVC64
-
 template<>
 struct SimplifyMemFunc< SINGLE_MEMFUNCPTR_SIZE + sizeof(int) >  
 {
@@ -376,7 +369,6 @@ struct SimplifyMemFunc< SINGLE_MEMFUNCPTR_SIZE + sizeof(int) >
 	}
 };
 
-#endif
 // virtual inheritance is a real nuisance. It's inefficient and complicated.
 // On MSVC and Intel, there isn't enough information in the pointer itself to
 // enable conversion to a closure pointer. Earlier versions of this code didn't
@@ -387,7 +379,7 @@ struct SimplifyMemFunc< SINGLE_MEMFUNCPTR_SIZE + sizeof(int) >
 
 // In VC++ and ICL, a virtual_inheritance member pointer 
 // is internally defined as:
-struct virtual_inheritance_struct
+struct MicrosoftVirtualMFP 
 {
 	void (GenericClass::*codeptr)(); // points to the actual member function
 	int delta;		// #bytes to be added to the 'this' pointer
@@ -409,62 +401,34 @@ struct GenericVirtualClass : virtual public GenericClass
 };
 
 // __virtual_inheritance classes go here
-#ifdef COMPILER_MSVC64
+#ifdef _MSC_VER
 #pragma warning( disable : 4121 )
-class __multiple_inheritance TestMultiClass;
-class __virtual_inheritance TestVirtualClass;
-const int kDelegMultiInhMemPtrSize = sizeof(void (TestMultiClass::*)());
-const int kDelegVirtualInhMemPtrSize = sizeof(void (TestVirtualClass::*)());
 #endif
 
 template <>
-struct SimplifyMemFunc< sizeof( virtual_inheritance_struct ) >
+struct SimplifyMemFunc<SINGLE_MEMFUNCPTR_SIZE + 2*sizeof(int) >
 {
 	template <class X, class XFuncType, class GenericMemFuncType>
 	inline static GenericClass *Convert(X *pthis, XFuncType function_to_bind, 
 		GenericMemFuncType &bound_func) 
 	{
-#ifdef COMPILER_MSVC64
-		COMPILE_TIME_ASSERT( kDelegMultiInhMemPtrSize == kDelegVirtualInhMemPtrSize );
-#endif
-
-		// This exists entirely so we can have an assert about it below.
-		struct legacy_virtual_inheritance_struct
-		{
-			GenericMemFuncType codeptr; // points to the actual member function
-			int delta;		// #bytes to be added to the 'this' pointer
-			int vtable_index; // or 0 if no virtual inheritance
-		};
-
-		COMPILE_TIME_ASSERT( sizeof( legacy_virtual_inheritance_struct ) == sizeof( virtual_inheritance_struct ) );
-
 		union 
 		{
 			XFuncType func;
 			GenericClass* (X::*ProbeFunc)();
-			virtual_inheritance_struct s;
+			MicrosoftVirtualMFP s;
 		} u;
 		u.func = function_to_bind;
 		bound_func = reinterpret_cast<GenericMemFuncType>(u.s.codeptr);
 		union 
 		{
 			GenericVirtualClass::ProbePtrType virtfunc;
-			virtual_inheritance_struct s;
+			MicrosoftVirtualMFP s;
 		} u2;
 		// Check that the horrible_cast<>s will work
-
-		// WARNING: If this assert goes off, check that someone isn't doing this type:
-		// 	#pragma pointers_to_members( full_generality, virtual_inheritance )
-		// On x64 that code will cause sizeof(u2.virtfunc) to ==24, instead of 16.
-		//
-		// The size of a pointer to member is sensitive to whether the pointed-to class
-		// has virtual function, virtual bases or multiple inheritance (or all of the
-		// above).  See #pragma pointers_to_members and command-line compiler options
-		// /vmg, /vmb.
-		typedef int ERROR_CantUsehorrible_cast[sizeof(function_to_bind)==sizeof(u.s) ? 1 : -1];
-		typedef int ERROR_CantUsehorrible_cast[sizeof(function_to_bind)==sizeof(u.ProbeFunc) ? 1 : -1];
-		typedef int ERROR_CantUsehorrible_cast[sizeof(u2.virtfunc)==sizeof(u2.s) ? 1 : -1];
-
+		typedef int ERROR_CantUsehorrible_cast[sizeof(function_to_bind)==sizeof(u.s)
+			&& sizeof(function_to_bind)==sizeof(u.ProbeFunc)
+			&& sizeof(u2.virtfunc)==sizeof(u2.s) ? 1 : -1];
    // Unfortunately, taking the address of a MF prevents it from being inlined, so 
    // this next line can't be completely optimised away by the compiler.
 		u2.virtfunc = &GenericVirtualClass::GetThis;
@@ -472,7 +436,9 @@ struct SimplifyMemFunc< sizeof( virtual_inheritance_struct ) >
 		return (pthis->*u.ProbeFunc)();
 	}
 };
-
+#ifdef _MSC_VER
+#pragma warning( default : 4121 )
+#endif
 
 #if (_MSC_VER <1300)
 
@@ -518,45 +484,31 @@ struct SimplifyMemFunc<SINGLE_MEMFUNCPTR_SIZE + 3*sizeof(int) >
 
 #else 
 
-// In VC++ and ICL, an unknown_inheritance member pointer 
-// is internally defined as:
-struct unknown_inheritance_struct
-{
-	typedef void (*FuncAddress_t)(); // arbitrary MFP.
-	FuncAddress_t funcaddress; // points to the actual member function
-	int delta;		// #bytes to be added to the 'this' pointer
-	int vtordisp;		// #bytes to add to 'this' to find the vtable
-	int vtable_index; // or 0 if no virtual inheritance
-};
-
 // Nasty hack for Microsoft and Intel (IA32 and Itanium)
 // unknown_inheritance classes go here 
 // This is probably the ugliest bit of code I've ever written. Look at the casts!
 // There is a compiler bug in MSVC6 which prevents it from using this code.
 template <>
-struct SimplifyMemFunc< sizeof( unknown_inheritance_struct ) >
+struct SimplifyMemFunc<SINGLE_MEMFUNCPTR_SIZE + 3*sizeof(int) >
 {
 	template <class X, class XFuncType, class GenericMemFuncType>
 	inline static GenericClass *Convert(X *pthis, XFuncType function_to_bind, 
 			GenericMemFuncType &bound_func) 
 	{
-		// This exists entirely so we can have an assert about it below.
-		struct legacy_unknown_inheritance_struct
-		{
-			GenericMemFuncType funcaddress;
-			int delta;
-			int vtordisp;
-			int vtable_index;
-		};
-
-		COMPILE_TIME_ASSERT( sizeof( legacy_unknown_inheritance_struct ) == sizeof( unknown_inheritance_struct ) );
-
 		// The member function pointer is 16 bytes long. We can't use a normal cast, but
 		// we can use a union to do the conversion.
 		union 
 		{
 			XFuncType func;
-			unknown_inheritance_struct s;
+			// In VC++ and ICL, an unknown_inheritance member pointer 
+			// is internally defined as:
+			struct 
+			{
+				GenericMemFuncType funcaddress; // points to the actual member function
+				int delta;		// #bytes to be added to the 'this' pointer
+				int vtordisp;		// #bytes to add to 'this' to find the vtable
+				int vtable_index; // or 0 if no virtual inheritance
+			} s;
 		} u;
 		// Check that the horrible_cast will work
 		typedef int ERROR_CantUsehorrible_cast[sizeof(XFuncType)==sizeof(u.s)? 1 : -1];
@@ -733,11 +685,6 @@ public:
 		m_pthis = (utldelegate::GenericClass*)( pThis );
 	}
 
-	const void *UnsafeGetThisPtr() const
-	{
-		return m_pthis;
-	}
-
 	void *UnsafeGetThisPtr()
 	{
 		return m_pthis;
@@ -882,7 +829,7 @@ public:
 	template< class DerivedClass >
 	inline void CopyFrom (DerivedClass *pParent, const CUtlAbstractDelegate &right) 
 	{
-		(void)pParent;
+		pParent;
 		SetMementoFrom(right);
 	}
 	// For static functions, the 'static_function_invoker' class in the parent 
@@ -1097,7 +1044,7 @@ public:
 	}
 	void Clear() { m_Closure.Clear();}
 	// Conversion to and from the CUtlAbstractDelegate storage class
-	const CUtlAbstractDelegate & GetAbstractDelegate() const { return m_Closure; }
+	const CUtlAbstractDelegate & GetAbstractDelegate() { return m_Closure; }
 	void SetAbstractDelegate(const CUtlAbstractDelegate &any) { m_Closure.CopyFrom(this, any); }
 
 private:	// Invoker for static functions
@@ -1223,7 +1170,7 @@ public:
 	}
 	void Clear() { m_Closure.Clear();}
 	// Conversion to and from the CUtlAbstractDelegate storage class
-	const CUtlAbstractDelegate & GetAbstractDelegate() const { return m_Closure; }
+	const CUtlAbstractDelegate & GetAbstractDelegate() { return m_Closure; }
 	void SetAbstractDelegate(const CUtlAbstractDelegate &any) { m_Closure.CopyFrom(this, any); }
 
 private:	// Invoker for static functions
@@ -1349,7 +1296,7 @@ public:
 	}
 	void Clear() { m_Closure.Clear();}
 	// Conversion to and from the CUtlAbstractDelegate storage class
-	const CUtlAbstractDelegate & GetAbstractDelegate() const { return m_Closure; }
+	const CUtlAbstractDelegate & GetAbstractDelegate() { return m_Closure; }
 	void SetAbstractDelegate(const CUtlAbstractDelegate &any) { m_Closure.CopyFrom(this, any); }
 
 private:	// Invoker for static functions
@@ -1475,7 +1422,7 @@ public:
 	}
 	void Clear() { m_Closure.Clear();}
 	// Conversion to and from the CUtlAbstractDelegate storage class
-	const CUtlAbstractDelegate & GetAbstractDelegate() const { return m_Closure; }
+	const CUtlAbstractDelegate & GetAbstractDelegate() { return m_Closure; }
 	void SetAbstractDelegate(const CUtlAbstractDelegate &any) { m_Closure.CopyFrom(this, any); }
 
 private:	// Invoker for static functions
@@ -1601,7 +1548,7 @@ public:
 	}
 	void Clear() { m_Closure.Clear();}
 	// Conversion to and from the CUtlAbstractDelegate storage class
-	const CUtlAbstractDelegate & GetAbstractDelegate() const { return m_Closure; }
+	const CUtlAbstractDelegate & GetAbstractDelegate() { return m_Closure; }
 	void SetAbstractDelegate(const CUtlAbstractDelegate &any) { m_Closure.CopyFrom(this, any); }
 
 private:	// Invoker for static functions
@@ -1727,7 +1674,7 @@ public:
 	}
 	void Clear() { m_Closure.Clear();}
 	// Conversion to and from the CUtlAbstractDelegate storage class
-	const CUtlAbstractDelegate & GetAbstractDelegate() const { return m_Closure; }
+	const CUtlAbstractDelegate & GetAbstractDelegate() { return m_Closure; }
 	void SetAbstractDelegate(const CUtlAbstractDelegate &any) { m_Closure.CopyFrom(this, any); }
 
 private:	// Invoker for static functions
@@ -1853,7 +1800,7 @@ public:
 	}
 	void Clear() { m_Closure.Clear();}
 	// Conversion to and from the CUtlAbstractDelegate storage class
-	const CUtlAbstractDelegate & GetAbstractDelegate() const { return m_Closure; }
+	const CUtlAbstractDelegate & GetAbstractDelegate() { return m_Closure; }
 	void SetAbstractDelegate(const CUtlAbstractDelegate &any) { m_Closure.CopyFrom(this, any); }
 
 private:	// Invoker for static functions
@@ -1979,7 +1926,7 @@ public:
 	}
 	void Clear() { m_Closure.Clear();}
 	// Conversion to and from the CUtlAbstractDelegate storage class
-	const CUtlAbstractDelegate & GetAbstractDelegate() const { return m_Closure; }
+	const CUtlAbstractDelegate & GetAbstractDelegate() { return m_Closure; }
 	void SetAbstractDelegate(const CUtlAbstractDelegate &any) { m_Closure.CopyFrom(this, any); }
 
 private:	// Invoker for static functions
@@ -2105,7 +2052,7 @@ public:
 	}
 	void Clear() { m_Closure.Clear();}
 	// Conversion to and from the CUtlAbstractDelegate storage class
-	const CUtlAbstractDelegate & GetAbstractDelegate() const { return m_Closure; }
+	const CUtlAbstractDelegate & GetAbstractDelegate() { return m_Closure; }
 	void SetAbstractDelegate(const CUtlAbstractDelegate &any) { m_Closure.CopyFrom(this, any); }
 
 private:	// Invoker for static functions
@@ -2702,9 +2649,6 @@ CUtlDelegate< FASTDLGT_RETTYPE ( Param1, Param2, Param3, Param4, Param5, Param6,
 
 // clean up after ourselves...
 #undef FASTDLGT_RETTYPE
-#ifdef _MSC_VER
-#pragma warning( pop ) 
-#endif
 
 #endif // !defined(UTLDELEGATEIMPL_H)
 

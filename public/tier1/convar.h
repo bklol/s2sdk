@@ -16,16 +16,17 @@
 #pragma once
 #endif
 
-#include "tier0/characterset.h"
 #include "tier0/dbg.h"
-#include "tier1/utlvector.h"
 #include "utlcommon.h"
+#include "tier1/utlvector.h"
+#include "tier1/utlstring.h"
 #include "mathlib/vector4d.h"
 #include "bufferstring.h"
-#include "color.h"
-#include "mathlib/vectorws.h"
+#include "tier1/characterset.h"
+#include "Color.h"
+#include "vectorws.h"
 #include "playerslot.h"
-#include "splitscreenslot.h"
+#include "schemasystem/schematypes.h"
 
 #include <cstdint>
 #include <cinttypes>
@@ -37,6 +38,36 @@ class CCommand;
 class ConCommand;
 class CCommandContext;
 class ConVarRefAbstract;
+
+class ConVarUserInfoSet_t
+{
+public:
+	uint8 *m_pData;
+};
+
+struct CSplitScreenSlot
+{
+	CSplitScreenSlot() :
+		m_Data(0)
+	{}
+	
+	CSplitScreenSlot( int index )
+	{
+		m_Data = index;
+	}
+	
+	int Get() const
+	{
+		return m_Data;
+	}
+
+	operator int() const
+	{
+		return m_Data;
+	}
+	
+	int m_Data;
+};
 
 //-----------------------------------------------------------------------------
 // Purpose: Internal structure of ConVar objects
@@ -214,9 +245,10 @@ struct CVarCreationBase_t
 											// Note: IVEngineClient::ClientCmd_Unrestricted can run any client command.
 
 #define FCVAR_EXECUTE_PER_TICK		(1ull<<29)
-
+#define FCVAR_SNAPSHOT_IGNORED		(1ull<<30) // TakeConVarSnapshot and ResetConVarsToSnapshot ignores cvars with this flag set
 #define FCVAR_DEFENSIVE				(1ull<<32)
 
+#define FCVAR_GAMEINFO_CANNOT_OVERRIDE (1ull<<34) // Code defaults can't be overridden from gameinfo
 
 //-----------------------------------------------------------------------------
 // Called when a ConCommand needs to execute
@@ -283,7 +315,7 @@ class CCommand
 public:
 	CCommand();
 	CCommand( int nArgC, const char **ppArgV );
-	bool Tokenize( const char *pCommand, const characterset_t *pBreakSet = nullptr );
+	bool Tokenize( CUtlString pCommand, characterset_t *pBreakSet = nullptr );
 	void Reset();
 
 	int ArgC() const;
@@ -312,15 +344,16 @@ private:
 		COMMAND_MAX_LENGTH = 512,
 	};
 
-	int m_nArgv0Size;
-	CUtlVectorFixedGrowable<char, COMMAND_MAX_LENGTH> m_ArgSBuffer;
-	CUtlVectorFixedGrowable<char, COMMAND_MAX_LENGTH> m_ArgvBuffer;
-	CUtlVectorFixedGrowable<char*, COMMAND_MAX_ARGC> m_Args;
-
-	// Set from CCommandBuffer::AddText/DequeueNextCommand, reset in Tokenize
-	bool m_bFromUntrustedSource = false; // command from untrusted source (client)
-	double m_flExecTime = NAN; // NaN = execute immediately
-	uint64 m_nRequiredFlags = 0; // required ConVar flags (see CCommandBuffer::SetRequiredFlags)
+    int m_nArgv0Size;
+    CUtlVectorFixedGrowable<char, COMMAND_MAX_LENGTH> m_ArgSBuffer;
+    CUtlVectorFixedGrowable<char, COMMAND_MAX_LENGTH> m_ArgvBuffer;
+    CUtlVectorFixedGrowable<char*, COMMAND_MAX_ARGC> m_Args;
+    // AMNOTE: Gates __beginseq/__endseq handling in the command buffer
+    bool m_unk101;
+    // Time of the input event the command came from, NaN for other commands
+    double m_flInputTime;
+    // AMNOTE: Also comes from the input event, 0 for other commands
+    uint64 m_unk201;
 };
 
 inline int CCommand::MaxCommandLength()
@@ -517,12 +550,13 @@ public:
 class ConCommandRef
 {
 private:
-	static const uint16 kInvalidAccessIndex = 0xFFFFu;
+	static const uint16 kInvalidAccessIndex = 0xFFFF;
 
 public:
-	ConCommandRef() : m_CommandAccessIndex( kInvalidAccessIndex ), m_CommandRegisteredIndex( 0u ) {}
-	ConCommandRef( uint16 command_idx ) : m_CommandAccessIndex( command_idx ), m_CommandRegisteredIndex( 0u ) {}
-	ConCommandRef( uint16 access_idx, uint32 reg_idx ) : m_CommandAccessIndex( access_idx ), m_CommandRegisteredIndex( reg_idx ) {}
+
+	ConCommandRef() : m_CommandAccessIndex( kInvalidAccessIndex ), m_CommandRegisteredIndex( 0 ) {}
+	ConCommandRef( uint16 command_idx ) : m_CommandAccessIndex( command_idx ), m_CommandRegisteredIndex( 0 ) {}
+	ConCommandRef( uint16 access_idx, int reg_idx ) : m_CommandAccessIndex( access_idx ), m_CommandRegisteredIndex( reg_idx ) {}
 
 	ConCommandRef( const char *name, bool allow_defensive = false );
 
@@ -551,18 +585,16 @@ public:
 		return GetRawData()->GetAutoCompleteSuggestions( command, completions );
 	}
 
-	void InvalidateRef() { m_CommandAccessIndex = kInvalidAccessIndex; m_CommandRegisteredIndex = 0u; }
+	void InvalidateRef() { m_CommandAccessIndex = kInvalidAccessIndex; m_CommandRegisteredIndex = 0; }
 	bool IsValidRef() const { return m_CommandAccessIndex != kInvalidAccessIndex; }
 	uint16 GetAccessIndex() const { return m_CommandAccessIndex; }
-	uint32 GetRegisteredIndex() const { return m_CommandRegisteredIndex; }
-
-	explicit operator bool() const { return m_CommandAccessIndex != kInvalidAccessIndex; }
+	int GetRegisteredIndex() const { return m_CommandRegisteredIndex; }
 
 private:
 	// Index into internal linked list of concommands
 	uint16 m_CommandAccessIndex;
 	// Commands registered positional index
-	uint32 m_CommandRegisteredIndex;
+	int m_CommandRegisteredIndex;
 };
 
 //-----------------------------------------------------------------------------
@@ -595,22 +627,22 @@ template <typename T>
 class CConVar;
 
 template <typename T>
-using FnTypedChangeCallback_t = void (*)(CConVar<T> *cvar, CSplitScreenSlot nSlot, const T *pNewValue, const T *pOldValue);
+using FnTypedChangeCallback_t = void(*)(CConVar<T> *cvar, CSplitScreenSlot nSlot, const T *pNewValue, const T *pOldValue);
 template <typename T>
-using FnTypedChangeCallbackProvider_t = void(*)(CConVar<T> *cvar, CSplitScreenSlot slot, const T *pNewValue, const T *pOldValue, void *__unk01, FnTypedChangeCallback_t<T> cb);
+using FnTypedChangeCallbackProvider_t = void(*)(CConVar<T> *cvar, CSplitScreenSlot slot, const T *pNewValue, const T *pOldValue, ConVarUserInfoSet_t *userinfo_data, FnTypedChangeCallback_t<T> cb);
 
 using FnGenericChangeCallback_t = void(*)(ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue);
-using FnGenericChangeCallbackProvider_t = void(*)(ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, void *__unk01, FnGenericChangeCallback_t cb);
+using FnGenericChangeCallbackProvider_t = void(*)(ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, ConVarUserInfoSet_t *userinfo_data, FnGenericChangeCallback_t cb);
 
 template <typename T>
-using FnTypedFilterCallback_t = bool (*)(CConVar<T> *cvar, CSplitScreenSlot nSlot, const T *pNewValue, const T *pOldValue);
+using FnTypedFilterCallback_t = bool(*)(CConVar<T> *cvar, CSplitScreenSlot nSlot, const T *pNewValue, const T *pOldValue);
 template <typename T>
-using FnTypedFilterCallbackProvider_t = void(*)(CConVar<T> *cvar, CSplitScreenSlot slot, const T *pNewValue, const T *pOldValue, void *__unk01, FnTypedFilterCallback_t<T> cb);
+using FnTypedFilterCallbackProvider_t = bool(*)(CConVar<T> *cvar, CSplitScreenSlot slot, const T *pNewValue, const T *pOldValue, ConVarUserInfoSet_t *userinfo_data, FnTypedFilterCallback_t<T> cb);
 
 using FnGenericFilterCallback_t = bool(*)(ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue);
-using FnGenericFilterCallbackProvider_t = bool(*)(ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, void *__unk01, FnGenericFilterCallback_t cb);
+using FnGenericFilterCallbackProvider_t = bool(*)(ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, ConVarUserInfoSet_t *userinfo_data, FnGenericFilterCallback_t cb);
 
-using FnCustomData_t = void *(*)();
+using FnGetEnumInfoHandle_t = SchemaMetaInfoHandle_t<CSchemaEnumInfo> (*)();
 
 struct ConVarValueInfo_t
 {
@@ -626,26 +658,26 @@ struct ConVarValueInfo_t
 		m_fnCallBack( nullptr ),
 		m_fnProviderFilterCallBack( nullptr ),
 		m_fnFilterCallBack( nullptr ),
-		m_fnCustomData( nullptr ),
+		m_fnGetEnumInfoHandle( nullptr ),
 		m_eVarType( type ),
 		m_CompletionCallBack()
 	{}
 
-	template<typename T>
+	template <typename T>
 	void SetDefaultValue( const T &value )
 	{
 		m_bHasDefault = true;
 		*reinterpret_cast<T *>(m_defaultValue) = value;
 	}
 
-	template<typename T>
+	template <typename T>
 	void SetMinValue( const T &min )
 	{
 		m_bHasMin = true;
 		*reinterpret_cast<T *>(m_minValue) = min;
 	}
 
-	template<typename T>
+	template <typename T>
 	void SetMaxValue( const T &max )
 	{
 		m_bHasMax = true;
@@ -657,8 +689,8 @@ struct ConVarValueInfo_t
 	{
 		if(cb)
 		{
-			m_fnProviderCallBack = []( ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, void *__unk01, FnGenericChangeCallback_t _cb ) {
-				reinterpret_cast<FnTypedChangeCallback_t<T>>(_cb)(reinterpret_cast<CConVar<T> *>(ref), nSlot, reinterpret_cast<const T *>(pNewValue), reinterpret_cast<const T *>(pOldValue));
+			m_fnProviderCallBack = []( ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, ConVarUserInfoSet_t *userinfo_data, FnGenericChangeCallback_t cb ) {
+				reinterpret_cast<FnTypedChangeCallback_t<T>>(cb)(reinterpret_cast<CConVar<T> *>(ref), nSlot, reinterpret_cast<const T *>(pNewValue), reinterpret_cast<const T *>(pOldValue));
 			};
 
 			m_fnCallBack = reinterpret_cast<FnGenericChangeCallback_t>(cb);
@@ -670,8 +702,8 @@ struct ConVarValueInfo_t
 	{
 		if(cb)
 		{
-			m_fnProviderFilterCallBack = []( ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, void *__unk01, FnGenericFilterCallback_t _cb ) -> bool {
-				return reinterpret_cast<FnTypedFilterCallback_t<T>>(_cb)(reinterpret_cast<CConVar<T> *>(ref), nSlot, reinterpret_cast<const T *>(pNewValue), reinterpret_cast<const T *>(pOldValue));
+			m_fnProviderFilterCallBack = []( ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, ConVarUserInfoSet_t *userinfo_data, FnGenericFilterCallback_t cb ) {
+				return reinterpret_cast<FnTypedFilterCallback_t<T>>(cb)(reinterpret_cast<CConVar<T> *>(ref), nSlot, reinterpret_cast<const T *>(pNewValue), reinterpret_cast<const T *>(pOldValue));
 			};
 
 			m_fnFilterCallBack = reinterpret_cast<FnGenericFilterCallback_t>(cb);
@@ -705,8 +737,7 @@ public:
 	// AMNOTE: Currently the only usage is lb_debug_tiles, lb_debug_silhouette and sc_visualize_sceneobjects
 	// which holds a reference to a enum schema binding, it's a string type under the hood and is converted from int
 	// to a enum value string via the change callbacks.
-	// So not sure if this is a concrete enum binding prop or any data prop.
-	FnCustomData_t m_fnCustomData;
+	FnGetEnumInfoHandle_t m_fnGetEnumInfoHandle;
 
 	EConVarType m_eVarType;
 
@@ -735,13 +766,7 @@ template <typename T> static void CvarTypeTrait_ClampFn( CVValue_t *obj, const C
 
 template<> bool CvarTypeTrait_StringToValueFn<CUtlString>( const char *string, CVValue_t *obj ) { obj->m_StringValue = string; return true; }
 
-template<> void CvarTypeTrait_ValueToStringFn<bool>( const CVValue_t *obj, CBufferString &buf )
-{
-	if ( obj->m_bValue )
-		buf = "true";
-	else
-		buf = "false";
-}
+template<> void CvarTypeTrait_ValueToStringFn<bool>( const CVValue_t *obj, CBufferString &buf ) { buf.Insert( 0, obj->m_bValue ? "true" : "false" ); }
 template<> void CvarTypeTrait_ValueToStringFn<int16>( const CVValue_t *obj, CBufferString &buf ) { buf.Format( "%d", obj->m_i16Value ); }
 template<> void CvarTypeTrait_ValueToStringFn<uint16>( const CVValue_t *obj, CBufferString &buf ) { buf.Format( "%u", obj->m_u16Value ); }
 template<> void CvarTypeTrait_ValueToStringFn<int32>( const CVValue_t *obj, CBufferString &buf ) { buf.Format( "%d", obj->m_i32Value ); }
@@ -750,7 +775,7 @@ template<> void CvarTypeTrait_ValueToStringFn<int64>( const CVValue_t *obj, CBuf
 template<> void CvarTypeTrait_ValueToStringFn<uint64>( const CVValue_t *obj, CBufferString &buf ) { buf.Format( "%llu", obj->m_u64Value ); }
 template<> void CvarTypeTrait_ValueToStringFn<float32>( const CVValue_t *obj, CBufferString &buf ) { buf.Format( "%f", obj->m_fl32Value ); }
 template<> void CvarTypeTrait_ValueToStringFn<float64>( const CVValue_t *obj, CBufferString &buf ) { buf.Format( "%lf", obj->m_fl64Value ); }
-template<> void CvarTypeTrait_ValueToStringFn<CUtlString>( const CVValue_t *obj, CBufferString &buf ) { buf.Set( obj->m_StringValue ); }
+template<> void CvarTypeTrait_ValueToStringFn<CUtlString>( const CVValue_t *obj, CBufferString &buf ) { buf.Insert( 0, obj->m_StringValue.Get() ); }
 template<> void CvarTypeTrait_ValueToStringFn<Vector2D>( const CVValue_t *obj, CBufferString &buf ) { buf.Format( "%f %f", obj->m_vec2Value[0], obj->m_vec2Value[1] ); }
 template<> void CvarTypeTrait_ValueToStringFn<Vector>( const CVValue_t *obj, CBufferString &buf ) { buf.Format( "%f %f %f", obj->m_vec3Value[0], obj->m_vec3Value[1], obj->m_vec3Value[2] ); }
 template<> void CvarTypeTrait_ValueToStringFn<Vector4D>( const CVValue_t *obj, CBufferString &buf ) { buf.Format( "%f %f %f %f", obj->m_vec4Value[0], obj->m_vec4Value[1], obj->m_vec4Value[2], obj->m_vec4Value[3] ); }
@@ -764,6 +789,7 @@ template<> void CvarTypeTrait_ValueToStringFn<Color>( const CVValue_t *obj, CBuf
 		buf.Format( "%d %d %d %d", obj->m_clrValue[0], obj->m_clrValue[1], obj->m_clrValue[2], obj->m_clrValue[3] );
 }
 
+template<> void CvarTypeTrait_ClampFn<bool>( CVValue_t *obj, const CVValue_t *min, const CVValue_t *max ) { }
 template<> void CvarTypeTrait_ClampFn<CUtlString>( CVValue_t *obj, const CVValue_t *min, const CVValue_t *max ) { }
 template<> void CvarTypeTrait_ClampFn<Color>( CVValue_t *obj, const CVValue_t *min, const CVValue_t *max )
 {
@@ -905,7 +931,7 @@ public:
 		m_iCompletionCBIndex = 0;
 		m_GameInfoFlags = 0;
 		m_UserInfoByteIndex = 0;
-		m_fnCustomData = nullptr;
+		m_fnGetEnumInfoHandle = nullptr;
 	}
 
 	const char *GetName( void ) const { return m_pszName; }
@@ -937,7 +963,8 @@ public:
 		return GetCvarTypeTraits( m_eVarType );
 	}
 
-	FnCustomData_t GetCustomDataFn() const { return m_fnCustomData; }
+	bool HasEnumInfo() const { return m_fnGetEnumInfoHandle != nullptr; }
+	SchemaMetaInfoHandle_t<CSchemaEnumInfo> GetEnumInfo() const { return HasEnumInfo() ? m_fnGetEnumInfoHandle() : SchemaMetaInfoHandle_t<CSchemaEnumInfo> {}; }
 
 	int GetDataByteSize() const { return TypeTraits()->m_ByteSize; }
 	bool IsPrimitiveType() const { return TypeTraits()->m_IsPrimitive; }
@@ -969,6 +996,7 @@ public:
 
 	// AMNOTE: Expects you to manually allocate its value and for it to be alive while it's used by the cvar
 	// Also you should be responsible for clearing memory on cleanup, by default game uses CCvar memory allocator for this
+	// These are ignored for string and bool types!
 	void SetMinValue( CVValue_t *value ) { m_minValue = value; }
 	void SetMaxValue( CVValue_t *value ) { m_maxValue = value; }
 
@@ -1024,7 +1052,7 @@ private:
 	int m_UserInfoByteIndex;
 
 	// Copied directly as is from ConVarValueInfo_t
-	FnCustomData_t m_fnCustomData;
+	FnGetEnumInfoHandle_t m_fnGetEnumInfoHandle;
 
 	// At convar registration this is trimmed to better match convar type being used
 	// or if it was initialized as EConVarType_Invalid it would be of this size
@@ -1068,39 +1096,25 @@ static ConVarData *GetInvalidConVarData( EConVarType type )
 class ConVarRef
 {
 private:
-	static const uint16 kInvalidAccessIndex = 0xFFFFu;
-	static const uint16 kInvalidCommandIndex = 0xFFFFu;
+	static const uint16 kInvalidAccessIndex = 0xFFFF;
 
 public:
-	ConVarRef( uint16 convar_idx = kInvalidAccessIndex, uint16 concom_idx = kInvalidCommandIndex, uint32 registered_idx = 0u ) : m_ConVar{ convar_idx, concom_idx, registered_idx } {}
-	ConVarRef( uint64 handle ) : m_Handle( handle ) {}
+	ConVarRef() : m_ConVarAccessIndex( kInvalidAccessIndex ), m_ConVarRegisteredIndex( 0 ) {}
+	ConVarRef( uint16 convar_idx ) : m_ConVarAccessIndex( convar_idx ), m_ConVarRegisteredIndex( 0 ) {}
+	ConVarRef( uint16 convar_idx, int registered_idx ) : m_ConVarAccessIndex( convar_idx ), m_ConVarRegisteredIndex( registered_idx ) {}
+
 	ConVarRef( const char *name, bool allow_defensive = false );
 
-	void InvalidateRef() { m_ConVar.m_iAccessIndex = kInvalidAccessIndex; m_ConVar.m_iRegisteredIndex = 0; }
-	bool IsValidRef() const { return m_ConVar.m_iAccessIndex != kInvalidAccessIndex; }
-	uint16 GetAccessIndex() const { return m_ConVar.m_iAccessIndex; }
-	uint32 GetRegisteredIndex() const { return m_ConVar.m_iRegisteredIndex; }
-	explicit operator bool() const { return m_ConVar.m_iAccessIndex != kInvalidAccessIndex; }
-	operator uint64() const { return m_Handle; }
+	void InvalidateRef() { m_ConVarAccessIndex = kInvalidAccessIndex; m_ConVarRegisteredIndex = 0; }
+	bool IsValidRef() const { return m_ConVarAccessIndex != kInvalidAccessIndex; }
+	uint16 GetAccessIndex() const { return m_ConVarAccessIndex; }
+	int GetRegisteredIndex() const { return m_ConVarRegisteredIndex; }
 
 protected:
-	struct Handle_t
-	{
-		// Index into internal linked list of convars
-		uint16 m_iAccessIndex;
-
-		// Index into internal linked list of concommands
-		uint16 m_iCommandIndex;
-
-		// ConVar registered positional index
-		uint32 m_iRegisteredIndex;
-	};
-
-	union
-	{
-		uint64 m_Handle;
-		Handle_t m_ConVar;
-	};
+	// Index into internal linked list of concommands
+	uint16 m_ConVarAccessIndex;
+	// ConVar registered positional index
+	int m_ConVarRegisteredIndex;
 };
 
 class ConVarRefAbstract : public ConVarRef
@@ -1118,11 +1132,6 @@ public:
 		: BaseClass( ref ), m_ConVarData( nullptr )
 	{
 		Init( *this, type );
-	}
-
-	ConVarRefAbstract( ConVarRef ref, ConVarData *data )
-		: BaseClass( ref ), m_ConVarData( data )
-	{
 	}
 
 	ConVarRefAbstract( const ConVarRefAbstract &ref )
@@ -1162,7 +1171,7 @@ public:
 	// Attempts to get value as a type T, does type conversion if possible,
 	// if no such action is available for CvarType/T combo, global default value for type T would be returned
 	template <typename T>
-	T GetAs( CSplitScreenSlot slot = -1 ) const;
+	const T GetAs( CSplitScreenSlot slot = -1 ) const;
 
 	// Attempts to get value as a bool, does type conversion if possible,
 	// if no such action is available for CvarType/bool combo, global default value for bool would be returned
@@ -1219,7 +1228,8 @@ protected:
 
 	void CopyRef( const ConVarRefAbstract &ref )
 	{
-		m_ConVar = ref.m_ConVar;
+		m_ConVarAccessIndex = ref.m_ConVarAccessIndex;
+		m_ConVarRegisteredIndex = ref.m_ConVarRegisteredIndex;
 		m_ConVarData = ref.m_ConVarData;
 	}
 
@@ -1246,7 +1256,7 @@ protected:
 
 uint64 SanitiseConVarFlags( uint64 flags );
 void SetupConVar( ConVarRefAbstract *cvar, ConVarData **cvar_data, ConVarCreation_t &info );
-void DestroyConVar( ConVarRef *cvar );
+void UnRegisterConVar( ConVarRef *cvar );
 
 template<typename T>
 class CConVarRef : public ConVarRefAbstract
@@ -1272,7 +1282,7 @@ public:
 		if(ref.GetType() == TranslateConVarType<T>())
 			CopyRef( ref );
 		else
-			Init( ConVarRef( ref.GetName() ), TranslateConVarType<T>() );
+			Init( ConVarRef(), TranslateConVarType<T>() );
 	}
 
 	// Constructs typed cvar ref if the type matches, otherwise this would be initialised to invalid convar data!
@@ -1292,7 +1302,7 @@ protected:
 	{
 		Assert( name );
 
-		Init( ConVarRef( name ), TranslateConVarType<T>() );
+		Init( ConVarRef(), TranslateConVarType<T>() );
 
 		ConVarCreation_t info;
 		info.m_pszName = name;
@@ -1348,7 +1358,7 @@ public:
 
 		value_info.SetCallback( cb );
 		value_info.SetFilterCallback( filter_cb );
-
+		
 		if(completion_cb.IsValid())
 		{
 			value_info.SetCompletionCallback( completion_cb );
@@ -1360,13 +1370,13 @@ public:
 
 	~CConVar()
 	{
-		DestroyConVar( this );
+		UnRegisterConVar( this );
 		BaseClass::InvalidateConVarData();
 	}
 };
 
 template<typename T>
-inline T ConVarRefAbstract::GetAs( CSplitScreenSlot slot ) const
+inline const T ConVarRefAbstract::GetAs( CSplitScreenSlot slot ) const
 {
 	CVValue_t *value = m_ConVarData->ValueOrDefault( slot );
 
@@ -1393,7 +1403,7 @@ inline T ConVarRefAbstract::GetAs( CSplitScreenSlot slot ) const
 }
 
 template<>
-inline CUtlString ConVarRefAbstract::GetAs( CSplitScreenSlot slot ) const
+inline const CUtlString ConVarRefAbstract::GetAs( CSplitScreenSlot slot ) const
 {
 	CBufferString buf;
 	GetValueAsString( buf, slot );
@@ -1414,20 +1424,16 @@ inline T ConVarRefAbstract::ConvertFromPrimitiveTo( CSplitScreenSlot slot ) cons
 
 		switch(GetType())
 		{
-			case EConVarType_Bool:      if constexpr(std::is_convertible_v<bool, T>) return value->m_bValue;
-			case EConVarType_Int16:     if constexpr(std::is_convertible_v<int16, T>) return value->m_i16Value;
-			case EConVarType_UInt16:    if constexpr(std::is_convertible_v<uint16, T>) return value->m_u16Value;
-			case EConVarType_Int32:     if constexpr(std::is_convertible_v<int32, T>) return value->m_i32Value;
-			case EConVarType_UInt32:    if constexpr(std::is_convertible_v<uint32, T>) return value->m_u32Value;
-			case EConVarType_Int64:     if constexpr(std::is_convertible_v<int64, T>) return value->m_i64Value;
-			case EConVarType_UInt64:    if constexpr(std::is_convertible_v<uint64, T>) return value->m_u64Value;
-			case EConVarType_Float32:   if constexpr(std::is_convertible_v<float32, T>) return value->m_fl32Value;
-			case EConVarType_Float64:   if constexpr(std::is_convertible_v<float64, T>) return value->m_fl64Value;
-			case EConVarType_Vector2:	if constexpr(std::is_convertible_v<Vector2D, T>) return value->m_vec2Value;
-			case EConVarType_Vector3:	if constexpr(std::is_convertible_v<Vector, T>) return value->m_vec3Value;
-			case EConVarType_Vector4:	if constexpr(std::is_convertible_v<Vector4D, T>) return value->m_vec4Value;
-			case EConVarType_Qangle:	if constexpr(std::is_convertible_v<QAngle, T>) return value->m_angValue;
-			default:					{ AssertMsg1(0, "Invalid ConVarRefAbstract primitive type (%d)", GetType()); return {}; }
+			case EConVarType_Bool:		return value->m_bValue;
+			case EConVarType_Int16:		return value->m_i16Value;
+			case EConVarType_UInt16:	return value->m_u16Value;
+			case EConVarType_Int32:		return value->m_i32Value;
+			case EConVarType_UInt32:	return value->m_u32Value;
+			case EConVarType_Int64:		return value->m_i64Value;
+			case EConVarType_UInt64:	return value->m_u64Value;
+			case EConVarType_Float32:	return value->m_fl32Value;
+			case EConVarType_Float64:	return value->m_fl64Value;
+			default:					break;
 		}
 	}
 
@@ -1484,20 +1490,16 @@ inline void ConVarRefAbstract::ConvertToPrimitiveFrom( CSplitScreenSlot slot, co
 	{
 		switch(GetType())
 		{
-			case EConVarType_Bool:		if constexpr(std::is_convertible_v<bool, T>) return CConVarRef<bool>( *this ).Set( value, slot );
-			case EConVarType_Int16:		if constexpr(std::is_convertible_v<int16, T>) return CConVarRef<int16>( *this ).Set( value, slot );
-			case EConVarType_UInt16:	if constexpr(std::is_convertible_v<uint16, T>) return CConVarRef<uint16>( *this ).Set( value, slot );
-			case EConVarType_Int32:		if constexpr(std::is_convertible_v<int32, T>) return CConVarRef<int32>( *this ).Set( value, slot );
-			case EConVarType_UInt32:	if constexpr(std::is_convertible_v<uint32, T>) return CConVarRef<uint32>( *this ).Set( value, slot );
-			case EConVarType_Int64:		if constexpr(std::is_convertible_v<int64, T>) return CConVarRef<int64>( *this ).Set( value, slot );
-			case EConVarType_UInt64:	if constexpr(std::is_convertible_v<uint64, T>) return CConVarRef<uint64>( *this ).Set( value, slot );
-			case EConVarType_Float32:	if constexpr(std::is_convertible_v<float32, T>) return CConVarRef<float32>( *this ).Set( value, slot );
-			case EConVarType_Float64:	if constexpr(std::is_convertible_v<float64, T>) return CConVarRef<float64>( *this ).Set( value, slot );
-			case EConVarType_Vector2:	if constexpr(std::is_convertible_v<Vector2D, T>) return CConVarRef<Vector2D>( *this ).Set( value, slot );
-			case EConVarType_Vector3:	if constexpr(std::is_convertible_v<Vector, T>) return CConVarRef<Vector>( *this ).Set( value, slot );
-			case EConVarType_Vector4:	if constexpr(std::is_convertible_v<Vector4D, T>) return CConVarRef<Vector4D>( *this ).Set( value, slot );
-			case EConVarType_Qangle:	if constexpr(std::is_convertible_v<QAngle, T>) return CConVarRef<QAngle>( *this ).Set( value, slot );
-			default:					{ AssertMsg1(0, "Invalid ConVarRefAbstract primitive type (%d)", GetType()); break; }
+			case EConVarType_Bool:		return CConVarRef<bool>( *this ).Set( value, slot );
+			case EConVarType_Int16:		return CConVarRef<int16>( *this ).Set( value, slot );
+			case EConVarType_UInt16:	return CConVarRef<uint16>( *this ).Set( value, slot );
+			case EConVarType_Int32:		return CConVarRef<int32>( *this ).Set( value, slot );
+			case EConVarType_UInt32:	return CConVarRef<uint32>( *this ).Set( value, slot );
+			case EConVarType_Int64:		return CConVarRef<int64>( *this ).Set( value, slot );
+			case EConVarType_UInt64:	return CConVarRef<uint64>( *this ).Set( value, slot );
+			case EConVarType_Float32:	return CConVarRef<float32>( *this ).Set( value, slot );
+			case EConVarType_Float64:	return CConVarRef<float64>( *this ).Set( value, slot );
+			default:					break;
 		}
 	}
 }
@@ -1508,9 +1510,8 @@ inline void ConVarRefAbstract::ConvertToPrimitiveFrom( CSplitScreenSlot slot, co
 typedef void (*FnConVarRegisterCallback)(ConVarRefAbstract *ref);
 typedef void (*FnConCommandRegisterCallback)(ConCommandRef *ref);
 
-bool ConVar_Register( uint64 nCVarFlag = 0, FnConVarRegisterCallback cvar_reg_cb = nullptr, FnConCommandRegisterCallback cmd_reg_cb = nullptr );
-uint64 ConVar_GetDefaultFlags();
-bool ConVar_Unregister( );
+void ConVar_Register( uint64 nCVarFlag = 0, FnConVarRegisterCallback cvar_reg_cb = nullptr, FnConCommandRegisterCallback cmd_reg_cb = nullptr );
+void ConVar_Unregister( );
 
 
 //-----------------------------------------------------------------------------
@@ -1569,6 +1570,68 @@ private:
 	T* m_pOwner;
 	FnMemberCommandCallback_t m_Func;
 	FnMemberCommandCompletionCallback_t m_CompletionFunc;
+};
+
+// AMNOTE: Shouldn't be used directly to create new concommands
+class ConCommandRegList
+{
+public:
+	friend void ConVar_Register( uint64 nCVarFlag, FnConVarRegisterCallback cvar_reg_cb, FnConCommandRegisterCallback cmd_reg_cb );
+	friend void ConVar_Unregister();
+	friend void SetupConCommand( ConCommand *cmd, const ConCommandCreation_t &info );
+
+	struct Entry_t
+	{
+		ConCommandCreation_t m_Info;
+		ConCommandRef *m_Command = nullptr;
+	};
+
+private:
+	static void RegisterConCommand( const Entry_t &cmd );
+	static void RegisterAll();
+	static void UnregisterAll();
+	static void AddToList( const Entry_t &cmd );
+
+public:
+	uint32 m_nSize;
+	Entry_t m_Entries[100];
+	ConCommandRegList *m_pPrev;
+
+private:
+	static bool s_bConCommandsRegistered;
+	static ConCommandRegList *s_pRoot;
+};
+
+// AMNOTE: Shouldn't be used directly to create new convars
+class ConVarRegList
+{
+public:
+	friend void ConVar_Register( uint64 nCVarFlag, FnConVarRegisterCallback cvar_reg_cb, FnConCommandRegisterCallback cmd_reg_cb );
+	friend void ConVar_Unregister();
+	friend void SetupConVar( ConVarRefAbstract *cvar, ConVarData **cvar_data, ConVarCreation_t &info );
+
+	struct Entry_t
+	{
+		ConVarCreation_t m_Info;
+
+		ConVarRefAbstract *m_pConVar = nullptr;
+		ConVarData **m_pConVarData = nullptr;
+	};
+
+private:
+	static void RegisterConVar( const Entry_t &cvar );
+	static void RegisterAll();
+	static void UnregisterAll();
+	static void AddToList( const Entry_t &cvar );
+
+public:
+	uint32 m_nSize;
+	Entry_t m_Entries[100];
+	ConVarRegList *m_pPrev;
+
+private:
+	static bool s_bConVarsRegistered;
+	static ConVarRegList *s_pRoot;
 };
 
 #ifdef _MSC_VER
@@ -1642,6 +1705,7 @@ private:
 	void _funcname( const CCommandContext &context, const CCommand &args )
 
 #define CON_COMMAND_MEMBER_F( _thisclass, name, _funcname, description, flags ) \
+	void _funcname( const CCommandContext &context, const CCommand &args );						\
 	friend class CCommandMemberInitializer_##_funcname;			\
 	class CCommandMemberInitializer_##_funcname					\
 	{															\
@@ -1655,6 +1719,5 @@ private:
 	};															\
 																\
 	CCommandMemberInitializer_##_funcname m_##_funcname##_register;		\
-	void _funcname( const CCommandContext &context, const CCommand &args )
 
 #endif // CONVAR_H

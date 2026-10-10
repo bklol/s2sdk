@@ -12,19 +12,24 @@
 #endif
 
 #include "utlleanvector.h"
-
-//#define TEST_UTLQUEUE
+#include "utlvectormemory.h"
 
 enum QueueIter_t { QUEUE_ITERATOR_INVALID = 0xffffffff };
 
-// T is the type stored in the queue
-template< class T, class M = CUtlLeanVector< T > > 
+template< class T >
+struct CUtlQueueNode_t
+{
+	T m_Element;
+};
+
+// T is the type stored in the queue, M holds its nodes in a ring over the whole allocation
+template< class T, class M = CUtlLeanVector< CUtlQueueNode_t< T >, int > >
 class CUtlQueue
 {
 public:
 
 	CUtlQueue( int growSize = 0, int initSize = 0 );
-	CUtlQueue( T *pMemory, int numElements );
+	~CUtlQueue();
 
 	// return the item from the front of the queue and delete it
 	T RemoveAtHead();
@@ -69,15 +74,14 @@ protected:
 	QueueIter_t Next_Unchecked( QueueIter_t it ) const;
 	QueueIter_t Previous_Unchecked( QueueIter_t it ) const;
 
+	T &Node( QueueIter_t it ) { return m_memory.Base()[ it ].m_Element; }
+	T const &Node( QueueIter_t it ) const { return m_memory.Base()[ it ].m_Element; }
+
 	M					m_memory;
 
 	// if m_head == m_tail == QUEUE_ITERATOR_INVALID, then the queue is empty
 	QueueIter_t			m_head;
 	QueueIter_t			m_tail;
-
-#ifdef TEST_UTLQUEUE
-	friend void CUtlQueue_Test();
-#endif
 };
 
 //-----------------------------------------------------------------------------
@@ -85,14 +89,13 @@ protected:
 // A queue class with a fixed allocation scheme
 //-----------------------------------------------------------------------------
 template< class T, size_t MAX_SIZE >
-class CUtlQueueFixed : public CUtlQueue< T, CUtlVectorMemory_Fixed<T, MAX_SIZE > >
+class CUtlQueueFixed : public CUtlQueue< T, CUtlVectorMemory_Fixed< CUtlQueueNode_t< T >, MAX_SIZE > >
 {
-	typedef CUtlQueue< T, CUtlVectorMemory_Fixed<T, MAX_SIZE > > BaseClass;
+	typedef CUtlQueue< T, CUtlVectorMemory_Fixed< CUtlQueueNode_t< T >, MAX_SIZE > > BaseClass;
 public:
 
 	// constructor, destructor
 	CUtlQueueFixed( int growSize = 0, int initSize = 0 ) : BaseClass( growSize, initSize ) {}
-	CUtlQueueFixed( T* pMemory, int numElements ) : BaseClass( pMemory, numElements ) {}
 };
 
 template< class T, class M >
@@ -102,16 +105,16 @@ inline CUtlQueue<T, M>::CUtlQueue( int growSize, int initSize ) :
 }
 
 template< class T, class M >
-inline CUtlQueue<T, M>::CUtlQueue( T *pMemory, int numElements ) : 
-	m_memory( pMemory, numElements ), m_head( QUEUE_ITERATOR_INVALID ), m_tail( QUEUE_ITERATOR_INVALID )
+inline CUtlQueue<T, M>::~CUtlQueue()
 {
+	RemoveAll();
 }
 
 template <class T, class M>
 inline T CUtlQueue<T, M>::RemoveAtHead()
 {
-	T temp;
-	Verify( RemoveAtHead( temp ) );
+	T temp{};
+	RemoveAtHead( temp );
 	return temp;
 }
 
@@ -126,8 +129,8 @@ inline bool CUtlQueue<T, M>::RemoveAtHead( T &removedElement )
 	}
 
 	QueueIter_t it = m_head;
-	removedElement = m_memory[ it ];
-	Destruct( &m_memory[ it ] );
+	removedElement = Node( it );
+	Destruct( &Node( it ) );
 	if ( m_head == m_tail )
 	{
 		m_head = m_tail = QUEUE_ITERATOR_INVALID;
@@ -142,7 +145,7 @@ inline bool CUtlQueue<T, M>::RemoveAtHead( T &removedElement )
 template <class T, class M>
 inline T CUtlQueue<T, M>::RemoveAtTail()
 {
-	T temp;
+	T temp{};
 	RemoveAtTail( temp );
 	return temp;
 }
@@ -150,15 +153,15 @@ inline T CUtlQueue<T, M>::RemoveAtTail()
 template <class T, class M>
 inline bool CUtlQueue<T, M>::RemoveAtTail( T &removedElement )
 {
-	Assert( m_tail != QUEUE_ITERATOR_INVALID );
+	AssertFatalMsg( m_tail != QUEUE_ITERATOR_INVALID, "Attempted to pop off of an empty CUtlQueue. Please check before using this method." );
 	if ( m_tail == QUEUE_ITERATOR_INVALID )
 	{
 		Construct( &removedElement );
 		return false;
 	}
 
-	removedElement = m_memory[ m_tail ];
-	Destruct( &m_memory[ m_tail ] );
+	removedElement = Node( m_tail );
+	Destruct( &Node( m_tail ) );
 	if ( m_head == m_tail )
 	{
 		m_head = m_tail = QUEUE_ITERATOR_INVALID;
@@ -180,7 +183,7 @@ inline T const& CUtlQueue<T, M>::Head() const
 		return dummy;
 	}
 
-	return m_memory[ m_head ];
+	return Node( m_head );
 }
 
 template <class T, class M>
@@ -193,7 +196,7 @@ inline T const& CUtlQueue<T, M>::Tail() const
 		return dummy;
 	}
 
-	return m_memory[ m_tail ];
+	return Node( m_tail );
 }
 
 template <class T, class M>
@@ -212,7 +215,7 @@ void CUtlQueue<T, M>::Insert( T const &element )
 		if ( nextTail == m_head ) // if non-empty, and growing by 1 appears to make the queue of length 1, then we were already full before the Insert
 		{
 			int nOldAllocCount = m_memory.NumAllocated();
-			m_memory.Grow();
+			m_memory.EnsureCapacity( nOldAllocCount + 1 );
 			int nNewAllocCount = m_memory.NumAllocated();
 			int nGrowAmount = nNewAllocCount - nOldAllocCount;
 
@@ -221,9 +224,9 @@ void CUtlQueue<T, M>::Insert( T const &element )
 			if ( m_head != QueueIter_t( 0 ) )
 			{
 				// if the queue wraps around the end of m_memory, move the part at the end of memory to the new end of memory
-				Q_memmove( &m_memory[ m_head + nGrowAmount ], &m_memory[ m_head ], ( nOldAllocCount - m_head ) * sizeof( T ) );
+				V_memmove( (void *)&Node( QueueIter_t( m_head + nGrowAmount ) ), (void *)&Node( m_head ), ( nOldAllocCount - m_head ) * sizeof( CUtlQueueNode_t< T > ) );
 #ifdef _DEBUG
-				Q_memset( &m_memory[ m_head ], 0xdd, nGrowAmount * sizeof( T ) );
+				V_memset( (void *)&Node( m_head ), 0xdd, nGrowAmount * sizeof( CUtlQueueNode_t< T > ) );
 #endif
 				m_head = QueueIter_t( m_head + nGrowAmount );
 			}
@@ -231,7 +234,7 @@ void CUtlQueue<T, M>::Insert( T const &element )
 		m_tail = nextTail;
 	}
 
-	CopyConstruct( &m_memory[ m_tail ], element );
+	CopyConstruct( &Node( m_tail ), element );
 }
 
 template <class T, class M>
@@ -239,7 +242,7 @@ bool CUtlQueue<T, M>::Check( T const element ) const
 {
 	for ( QueueIter_t it = First(); it != QUEUE_ITERATOR_INVALID; it = Next( it ) )
 	{
-		if ( m_memory[ it ] == element )
+		if ( Node( it ) == element )
 			return true;
 	}
 	return false;
@@ -292,13 +295,13 @@ QueueIter_t CUtlQueue<T, M>::Previous( QueueIter_t it ) const
 template <class T, class M>
 QueueIter_t CUtlQueue<T, M>::Next_Unchecked( QueueIter_t it ) const
 {
-	return it == m_memory.Count() - 1 ? QueueIter_t( 0 ) : QueueIter_t( it + 1 );
+	return (int)it == m_memory.NumAllocated() - 1 ? QueueIter_t( 0 ) : QueueIter_t( it + 1 );
 }
 
 template <class T, class M>
 QueueIter_t CUtlQueue<T, M>::Previous_Unchecked( QueueIter_t it ) const
 {
-	return it == 0 ? QueueIter_t( m_memory.Count() - 1 ) : QueueIter_t( it - 1 );
+	return it == 0 ? QueueIter_t( m_memory.NumAllocated() - 1 ) : QueueIter_t( it - 1 );
 }
 
 template <class T, class M>
@@ -313,7 +316,7 @@ bool CUtlQueue<T, M>::IsValid( QueueIter_t it ) const
 	if ( m_head <= m_tail )
 		return it >= m_head && it <= m_tail;
 
-	return ( it >= m_head && it < m_memory.Count() ) || ( it >= 0 && it <= m_tail );
+	return ( it >= m_head && (int)it < m_memory.NumAllocated() ) || ( it >= 0 && it <= m_tail );
 }
 
 template <class T, class M>
@@ -327,7 +330,7 @@ T const& CUtlQueue<T, M>::Element( QueueIter_t it ) const
 	}
 
 	Assert( IsValid( it ) );
-	return m_memory[ it ];
+	return Node( it );
 }
 
 template <class T, class M>
@@ -343,7 +346,7 @@ int CUtlQueue<T, M>::Count() const
 	if ( m_head <= m_tail )
 		return m_tail + 1 - m_head;
 
-	return m_tail + 1 - m_head + m_memory.Count();
+	return m_tail + 1 - m_head + m_memory.NumAllocated();
 }
 
 template <class T, class M>
@@ -356,196 +359,24 @@ bool CUtlQueue<T, M>::IsEmpty() const
 template <class T, class M>
 void CUtlQueue<T, M>::RemoveAll()
 {
+	if ( m_head != QUEUE_ITERATOR_INVALID )
+	{
+		for ( QueueIter_t it = m_head; ; it = Next_Unchecked( it ) )
+		{
+			Destruct( &Node( it ) );
+			if ( it == m_tail )
+				break;
+		}
+	}
+
 	m_head = m_tail = QUEUE_ITERATOR_INVALID;
 }
 
 template <class T, class M>
 void CUtlQueue<T, M>::Purge()
 {
-	m_head = m_tail = QUEUE_ITERATOR_INVALID;
+	RemoveAll();
 	m_memory.Purge();
 }
-
-
-#ifdef TEST_UTLQUEUE
-
-#include <stdlib.h>
-
-struct Data_t
-{
-	Data_t( int i = 0xffffffff ) : m_id( i ) {}
-	Data_t( const Data_t &that ) : m_id( that.m_id ) {}
-	~Data_t() { m_id = 0xdddddddd; }
-	Data_t &operator=( const Data_t &that ) { m_id = that.m_id; return *this; }
-
-	int m_id;
-};
-
-inline void CUtlQueue_Test()
-{
-	CUtlQueue< Data_t > queue;
-
-	for ( int n = 1; n < 100; ++n )
-	{
-		Assert( queue.Count() == 0 );
-		Assert( queue.m_head == QUEUE_ITERATOR_INVALID );
-		Assert( queue.m_tail == QUEUE_ITERATOR_INVALID );
-
-		int w = rand() % n;
-		for ( int i = 0; i < w; ++i )
-		{
-			queue.Insert( Data_t( i ) );
-		}
-
-		if ( w > 0 )
-		{
-			Assert( queue.Head().m_id == queue.First() );
-			Assert( queue.Tail().m_id == queue.Last() );
-			Assert( queue.Head().m_id == 0 );
-			Assert( queue.Tail().m_id == w - 1 );
-		}
-		Assert( queue.Count() == w );
-
-		for ( int j = 0; j < n; ++j )
-		{
-			queue.Insert( Data_t( w + j ) );
-
-			if ( j == 0 )
-			{
-				Assert( queue.Count() == w + j + 1 );
-
-				for ( int i = 0; i < w; ++i )
-				{
-					queue.RemoveAtHead();
-				}
-			}
-
-			Assert( queue.Count() == j + 1 );
-
-			Assert( queue.m_head != QUEUE_ITERATOR_INVALID );
-			Assert( queue.m_tail != QUEUE_ITERATOR_INVALID );
-
-			int id = queue.Head().m_id % queue.m_memory.Count();
-			for ( QueueIter_t it = queue.First(); it != QUEUE_ITERATOR_INVALID; it = queue.Next( it ) )
-			{
-				Assert( queue.Element( it ).m_id % queue.m_memory.Count() == id );
-				id = ( id + 1 ) % queue.m_memory.Count();
-			}
-
-			id = queue.Tail().m_id % queue.m_memory.Count();
-			for ( QueueIter_t it = queue.Last(); it != QUEUE_ITERATOR_INVALID; it = queue.Previous( it ) )
-			{
-				Assert( queue.Element( it ).m_id % queue.m_memory.Count() == id );
-				id = ( id + queue.m_memory.Count() - 1 ) % queue.m_memory.Count();
-			}
-
-			for ( int i = 0; i < j; ++i )
-			{
-				int id = queue.m_memory[ i ].m_id;
-				if ( queue.IsValid( QueueIter_t( i ) ) )
-				{
-					Assert( ( id & 0xff000000 ) == 0 );
-				}
-				else
-				{
-					Assert( id == 0xdddddddd );
-				}
-			}
-		}
-
-		Assert( queue.Count() == n );
-#if 0
-		for ( int j = 0; j < n; ++j )
-		{
-			Assert( queue.m_head != QUEUE_ITERATOR_INVALID );
-			Assert( queue.m_tail != QUEUE_ITERATOR_INVALID );
-
-			Assert( queue.Count() == n - j );
-
-			Data_t data = queue.RemoveAtHead();
-
-			Assert( queue.Count() == n - j - 1 );
-
-			if ( queue.Count() > 0 )
-			{
-				int id = queue.Head().m_id % queue.m_memory.Count();
-				for ( QueueIter_t it = queue.First(); it != QUEUE_ITERATOR_INVALID; it = queue.Next( it ) )
-				{
-					Assert( queue.Element( it ).m_id % queue.m_memory.Count() == id );
-					id = ( id + 1 ) % queue.m_memory.Count();
-				}
-
-				id = queue.Tail().m_id % queue.m_memory.Count();
-				for ( QueueIter_t it = queue.Last(); it != QUEUE_ITERATOR_INVALID; it = queue.Previous( it ) )
-				{
-					Assert( queue.Element( it ).m_id % queue.m_memory.Count() == id );
-					id = ( id + queue.m_memory.Count() - 1 ) % queue.m_memory.Count();
-				}
-			}
-
-			for ( int i = 0; i < j; ++i )
-			{
-				int id = queue.m_memory[ i ].m_id;
-				if ( queue.IsValid( QueueIter_t( i ) ) )
-				{
-					Assert( ( id & 0xff000000 ) == 0 );
-				}
-				else
-				{
-					Assert( id == 0xdddddddd );
-				}
-			}
-		}
-#else
-		for ( int j = n - 1; j >= 0; --j )
-		{
-			Assert( queue.m_head != QUEUE_ITERATOR_INVALID );
-			Assert( queue.m_tail != QUEUE_ITERATOR_INVALID );
-
-			Assert( queue.Count() == j + 1 );
-
-			Data_t data = queue.RemoveAtTail();
-
-			Assert( queue.Count() == j );
-
-			if ( queue.Count() > 0 )
-			{
-				int id = queue.Head().m_id % queue.m_memory.Count();
-				for ( QueueIter_t it = queue.First(); it != QUEUE_ITERATOR_INVALID; it = queue.Next( it ) )
-				{
-					Assert( queue.Element( it ).m_id % queue.m_memory.Count() == id );
-					id = ( id + 1 ) % queue.m_memory.Count();
-				}
-
-				id = queue.Tail().m_id % queue.m_memory.Count();
-				for ( QueueIter_t it = queue.Last(); it != QUEUE_ITERATOR_INVALID; it = queue.Previous( it ) )
-				{
-					Assert( queue.Element( it ).m_id % queue.m_memory.Count() == id );
-					id = ( id + queue.m_memory.Count() - 1 ) % queue.m_memory.Count();
-				}
-			}
-
-			for ( int i = 0; i < j; ++i )
-			{
-				int id = queue.m_memory[ i ].m_id;
-				if ( queue.IsValid( QueueIter_t( i ) ) )
-				{
-					Assert( ( id & 0xff000000 ) == 0 );
-				}
-				else
-				{
-					Assert( id == 0xdddddddd );
-				}
-			}
-		}
-#endif
-
-		Assert( queue.Count() == 0 );
-		Assert( queue.m_head == QUEUE_ITERATOR_INVALID );
-		Assert( queue.m_tail == QUEUE_ITERATOR_INVALID );
-	}
-}
-
-#endif // TEST_UTLQUEUE
 
 #endif // UTLQUEUE_H

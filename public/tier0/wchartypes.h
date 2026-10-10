@@ -20,42 +20,11 @@
 // Temporarily turn off Valve defines
 #include "tier0/valve_off.h"
 
-#if !defined(_WCHAR_T_DEFINED)  && !defined( __WCHAR_TYPE__ ) && !defined(GNUC)
-typedef unsigned short wchar_t;
-#define _WCHAR_T_DEFINED
-#endif
-
 // char8
 // char8 is equivalent to char, and should be used when you really need a char
 // (for example, when calling an external function that's declared to take
 // chars).
 typedef char char8;
-
-// uint8
-// uint8 is equivalent to byte (but is preferred over byte for clarity).  Use this
-// whenever you mean a byte (for example, one byte of a network packet).
-typedef unsigned char uint8;
-typedef unsigned char BYTE;
-typedef unsigned char byte;
-// uchar
-// uchar is equivalent to unsigned char, typically used for clarity
-// when you mean an unsigned character or a raw byte.
-typedef unsigned char uchar;
-
-// ushort
-// ushort is equivalent to unsigned short. Use this when you want a clear,
-// concise alias for unsigned short integers (typically 16 bits).
-typedef unsigned short ushort;
-
-// uint
-// uint is equivalent to unsigned int. Use this when you want a short and clear
-// type name for unsigned integer values (typically 32 bits).
-typedef unsigned int uint;
-
-// ulong
-// ulong is equivalent to unsigned long. Use this when you need an unsigned long
-// integer type (typically 32 or 64 bits depending on platform).
-typedef unsigned long ulong;
 
 // uint8
 // uint8 is equivalent to byte (but is preferred over byte for clarity).  Use this
@@ -124,20 +93,6 @@ typedef wchar_t uchar32;
 
 #ifdef FORCED_UNICODE
 #undef _UNICODE
-#endif
-
-#if defined( _MSC_VER ) || defined( WIN32 )
-typedef wchar_t	uchar16;
-typedef unsigned int uchar32;
-#else
-typedef unsigned short uchar16;
-typedef wchar_t uchar32;
-#endif
-
-#ifdef GNUC
-typedef unsigned short ucs2; // wchar_t is 4 bytes on sane os's, specially define a ucs2 type so we can read out localization files and the list saved as 2 byte wchar (or ucs16 Matt tells me)
-#elif defined(_MSC_VER)
-typedef wchar_t ucs2; // under windows wchar_t is ucs2
 #endif
 
 // Turn valve defines back on

@@ -6,24 +6,24 @@
 #endif
 
 #include <platform.h>
-#include <tier0/utlstring.h>
-#include <tier1/utlhash.h>
 
 #include <networksystem/iprotobufbinding.h>
-#include <tier0/utlstring.h>
+#include <tier1/utlstring.h>
+#include <tier1/utlcommon.h>
 #include <tier1/bitbuf.h>
 #include <tier1/utldict.h>
-#include "color.h"
+#include <tier1/utlhash.h>
+#include "Color.h"
+#include "schemasystem/schematypes.h"
 
 #include <memory>
 
-#define CODEGEN_HASH_TOKEN (0x3501A674)
-
-class CChoreoComponent;
-class CEntityInstance;
-class CCheckTransmitInfo;
-class CNetworkSerializerCodeGenDatabase;
 class CNetMessage;
+class CNetworkSerializerCodeGenDatabase;
+class CCheckTransmitInfo;
+class CEntityInstance;
+class CChoreoComponent;
+class CNetworkSerializerClassInfo;
 
 enum NetworkValidationMode_t
 {
@@ -41,18 +41,65 @@ enum NetworkSerializationMode_t
 };
 
 typedef int NetworkMessageId;
-typedef int8 NetworkGroupId;
-typedef int NetworkCategoryId;
-typedef int16 NetworkContextDataId;
+typedef uint8 NetworkGroupId;
+typedef uint NetworkCategoryId;
+
+struct NetMessageInfo_t
+{
+	int m_nCategories;
+	IProtobufBinding *m_pBinding;
+	CUtlString m_szGroup;
+	NetworkMessageId m_MessageId;
+	NetworkGroupId m_GroupId;
+
+	// Bits 0..5 - IProtobufBinding::GetBufType()
+	// (1 << 6) - FLAG_AUTOASSIGNEDID
+	// (1 << 7) - FLAG_UNK001
+	uint8 m_nFlags;
+
+	// AMNOTE: A second category mask, AddCategoryMask ORs nMask into it too when its bool is true
+	int m_unk101;
+	bool m_bOkayToRedispatch;
+};
+
+abstract_class INetworkMessageInternal
+{
+public:
+	virtual ~INetworkMessageInternal() = 0;
+
+	virtual const char *GetUnscopedName() = 0;
+	virtual NetMessageInfo_t *GetNetMessageInfo() = 0;
+
+	virtual void SetMessageId( NetworkMessageId nMessageId ) = 0;
+
+	virtual void AddCategoryMask( int nMask, bool ) = 0;
+
+	virtual void SwitchMode( NetworkValidationMode_t nMode ) = 0;
+
+	virtual CNetMessage *AllocateMessage() = 0;
+
+	// Calls to INetworkMessages::SerializeMessageInternal
+	virtual bool Serialize( bf_write &pBuf, const CNetMessage *pData ) = 0;
+	// Calls to INetworkMessages::UnserializeMessageInternal
+	virtual bool Unserialize( bf_read &pBuf, CNetMessage *pData ) = 0;
+};
 
 struct NetworkRecipientsFilter_t
 {
-	using FilterCb = void (*)(CEntityInstance *ent, CCheckTransmitInfo *pInfo, CPlayerBitVec &player_mask);
+	class CFilterOwner {};
+	using FilterCb = void (CFilterOwner::*)(CCheckTransmitInfo *pInfo, CPlayerBitVec &player_mask);
 
-	void *m_unk001;
+	enum FilterOwnerType : int8
+	{
+		Filter_Other = 1,
+		Filter_Entity = 2,
+		Filter_FieldOwner = 3
+	};
+
+	CFilterOwner *m_FilterOwner;
 	FilterCb m_FilterFn;
 	CUtlString m_FilterName;
-	int8 m_unk101;
+	FilterOwnerType m_FitlerOwnerType;
 };
 
 struct NetworkChangePointerCallback_t
@@ -66,12 +113,33 @@ struct NetworkChangePointerCallback_t
 	int8 m_unk101;
 };
 
+enum NetworkOverrideType_t
+{
+	MNetworkOverride_Invalid = -1,
+	MNetworkSerializer = 0,
+	MNetworkEncoder,
+	MNetworkChangeCallback,
+	MNetworkChangeTag,
+	MNetworkBitCount,
+	MNetworkUserGroup,
+	MNetworkPriority,
+	MNetworkOutOfPVSUpdates,
+	MNetworkRemoveAll,
+};
+
+enum OOPVSUpdates_t
+{
+	OOPVSUpdates_OptOut = 0,
+	OOPVSUpdates_OptIn,
+	OOPVSUpdates_Default,
+};
+
 struct NetworkOverride_t
 {
 	const char *m_ParentClass;
 	const char *m_FieldName;
-	const char *m_FieldPriority;
-	int m_unk001;
+	const char *m_Value;
+	NetworkOverrideType_t m_Type;
 };
 
 struct VarTypeOverride_t
@@ -134,10 +202,7 @@ public:
 	SchemaCollectionManipulatorFn_t m_CollectionManipulatorFn;
 	CUtlVector<CUtlString> m_NetworkIncludeByUserGroup;
 	CUtlVector<CUtlString> m_NetworkChangeCb;
-
-	int m_unk101;
-	void *m_unk102;
-	void *m_unk103;
+	CUtlVector<CUtlString> m_NetworkChangeTags;
 
 	int m_NetworkBitCount;
 	int m_NetworkEncodeFlags;
@@ -145,8 +210,9 @@ public:
 	float m_NetworkMin;
 	float m_NetworkMax;
 
-	int m_unk201;
-	int8 m_unk202;
+	OOPVSUpdates_t m_NetworkOutOfPVSUpdates;
+	bool m_NetworkBitCountSet;
+	bool m_NetworkVarEmbeddedNotFlattened;
 
 	bool m_NetworkPolymorphic;
 	CUtlString m_pszCodeGenType;
@@ -159,7 +225,7 @@ public:
 	CUtlString m_TypeOverride;
 	CUtlString m_BuiltinUnderlyingType;
 
-	char m_PathExtension[8];
+	char m_ResourceTypeForInfoType[8];
 	int m_FixedArraySize;
 	char m_IsAtomic;
 	char m_IsBuiltIn;
@@ -186,7 +252,7 @@ struct SerializerFieldLookup_t
 };
 
 template<> struct DefaultEqualFunctor<SerializerFieldLookup_t> { bool operator()( SerializerFieldLookup_t a, SerializerFieldLookup_t b ) const { return a.m_FieldName == b.m_FieldName; } };
-template<> struct DefaultHashFunctor<SerializerFieldLookup_t> { unsigned int operator()( SerializerFieldLookup_t a ) const { return MurmurHash2LowerCase( a.m_FieldName.String(), CODEGEN_HASH_TOKEN ); } };
+template<> struct DefaultHashFunctor<SerializerFieldLookup_t> { unsigned int operator()( SerializerFieldLookup_t a ) const { return HashStringCaseless( a.m_FieldName.String() ); } };
 
 class CNetworkSerializerClassInfo
 {
@@ -212,6 +278,10 @@ public:
 		CUtlVector<CUtlString> m_IncludeList;
 	};
 
+	// AMNOTE: nAction 0 allocates and constructs a new object, 1 destructs and frees pObject,
+	// 2 returns the CNetworkSerializerClassInfo of pObject's most derived class
+	typedef void *(*ManipulatorFn_t)( int nAction, void *pObject );
+
 	CUtlStringToken m_nHash;
 	CUtlString m_pszClassName;
 	CUtlVector<CNetworkSerializerFieldInfo *> m_Fields;
@@ -221,15 +291,12 @@ public:
 	CUtlHash<SerializerFieldLookup_t> m_FieldLookupTable;
 	int m_nTotalFieldEntries;
 
-	CUtlVector<CNetworkSerializerClassInfo> m_ParentClassInfo;
+	CUtlVector<CNetworkSerializerClassInfo *> m_ParentClassInfo;
 	CNetworkSerializerClassInfo *m_ParentClassInfoBuffer;
 	CUtlVector<int> m_ParentClassOffset;
 
-	struct
-	{
-		void *m_unk001;
-		CUtlLinkedList<void *, int> m_unk002;
-	} m_unk001;
+	// AMNOTE: Maps member names like __m_pChainEntity and m_PathIndex to their offsets in the class
+	CUtlDict<uint16> m_unk101;
 
 	CUtlVector<NetworkOverride_t *> m_NetworkOverrides;
 	// Includes this class and parent overreides
@@ -243,17 +310,19 @@ public:
 
 	int32_t m_nClassSize;
 	int m_NetworkOutOfPVSUpdates;
-	int m_unk101;
+	// AMNOTE: Allocation mode, only 1 and 2 allow allocating and freeing through m_pfnManipulator
+	int m_unk201;
 
-	SchemaClassManipulatorFn_t m_pfnManipulator;
+	ManipulatorFn_t m_pfnManipulator;
 
 	bool m_Initialized;
 	bool m_NetworkVarsAtomic;
-	bool m_unk201;
-	bool m_unk202;
+	bool m_unk301;
+	bool m_NetworkNoBase;
 	bool m_NetworkStructNotInNetworkUtlVectorEmbedded;
-
-	CThreadSpinRWLock m_Mutex;
+	bool m_NetworkVarEmbeddedNotFlattened;
+	// AMNOTE: Only the constructor writes it
+	bool m_unk401;
 };
 
 class CNetworkSerializerCodeGenDatabase
@@ -279,46 +348,5 @@ public:
 
 	int32_t m_nDuplicateCount;
 };
-
-struct NetMessageInfo_t
-{
-	int m_nCategories;
-	IProtobufBinding *m_pBinding;
-	CUtlString m_szGroup;
-	NetworkMessageId m_MessageId;
-	NetworkGroupId m_GroupId;
-
-	// (1 << 0) - FLAG_RELIABLE
-	// (1 << 6) - FLAG_AUTOASSIGNEDID
-	// (1 << 7) - FLAG_UNK001
-	uint8 m_nFlags;
-
-	int m_unk001;
-	bool m_bOkayToRedispatch;
-};
-
-abstract_class INetworkMessageInternal
-{
-public:
-	virtual ~INetworkMessageInternal() = 0;
-
-	virtual const char *GetUnscopedName() = 0;
-	virtual NetMessageInfo_t *GetNetMessageInfo() = 0;
-
-	virtual void SetMessageId( NetworkMessageId nMessageId ) = 0;
-
-	virtual void AddCategoryMask( uint32 nMask, bool bOverrideField = false ) = 0;
-
-	virtual void SwitchMode( NetworkValidationMode_t nMode ) = 0;
-
-	virtual CNetMessage *AllocateMessage() = 0;
-
-	// Calls to INetworkMessages::SerializeMessageInternal
-	virtual bool Serialize( bf_write &pBuf, const CNetMessage *pData ) = 0;
-	// Calls to INetworkMessages::UnserializeMessageInternal
-	virtual bool Unserialize( bf_read &pBuf, CNetMessage *pData ) = 0;
-};
-
-using INetworkSerializerPB = INetworkMessageInternal;
 
 #endif /* NETWORKSERIALIZER_H */

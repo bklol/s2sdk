@@ -805,9 +805,9 @@ public:
 		return IntrusiveList::PrevNode( m_pHead, node );
 	}
 
-	int NthNode( int n )
+	T *NthNode( int n )
 	{
-		return NthNode( m_pHead, n );
+		return IntrusiveList::NthNode( m_pHead, n );
 	}
 
 	// this will kill all elements in a list if
@@ -890,12 +890,12 @@ public:
 	
 	T * PrevNode(T *node)
 	{
-		return ( node )?node->m_Prev:NULL;
+		return ( node )?node->m_pPrev:NULL;
 	}
 
 };
 
-// doubly linked list with a tail ptr for fast addtotail.
+// doubly linked list with a tial ptr for fast addtotail.
 template<class T> class CUtlIntrusiveDListWithTailPtr : public CUtlIntrusiveDList<T>
 {
 public:
@@ -952,7 +952,7 @@ public:
 	
 	T * PrevNode(T *node)
 	{
-		return ( node )?node->m_Prev:NULL;
+		return ( node )?node->m_pPrev:NULL;
 	}
 
 };

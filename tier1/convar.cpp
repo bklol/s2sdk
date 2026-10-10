@@ -10,16 +10,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits>
 #include "basetypes.h"
-#include "tier0/characterset.h"
-#include "tier0/strtools.h"
-#include "tier0/utlbuffer.h"
 #include "tier1/convar.h"
+#include "tier1/strtools.h"
+#include "tier1/characterset.h"
 #include "tier1/utlvector.h"
-#include "tier1/tier1.h"
+#include "tier1/utlbuffer.h"
 #include "icvar.h"
 #include "tier0/dbg.h"
-#include "color.h"
+#include "Color.h"
 #if defined( _X360 )
 #include "xbox/xbox_console.h"
 #endif
@@ -37,112 +37,94 @@ static FnConCommandRegisterCallback s_ConCommandRegCB = nullptr;
 static uint64 s_nCVarFlag = 0;
 static bool s_bRegistered = false;
 
-class ConCommandRegList
+bool ConCommandRegList::s_bConCommandsRegistered = false;
+ConCommandRegList *ConCommandRegList::s_pRoot = nullptr;
+
+void UnRegisterConCommand( ConCommandRef *cmd )
 {
-public:
-	struct Entry_t
+	if(cmd->IsValidRef())
 	{
-		ConCommandCreation_t m_Info;
-		ConCommandRef *m_Command = nullptr;
-	};
+		if(g_pCVar)
+			g_pCVar->UnregisterConCommandCallbacks( *cmd );
 
-	static void RegisterConCommand( const Entry_t &cmd )
-	{
-		Assert( g_pCVar );
-		*cmd.m_Command = g_pCVar->RegisterConCommand( cmd.m_Info, s_nCVarFlag );
-		if ( !cmd.m_Command->IsValidRef() )
-		{
-			Plat_FatalError( "RegisterConCommand: Unknown error registering con command \"%s\"!\n", cmd.m_Info.m_pszName );
-			DebuggerBreakIfDebugging();
-		}
-		else if ( s_ConCommandRegCB )
-			s_ConCommandRegCB( cmd.m_Command );
+		cmd->InvalidateRef();
 	}
+}
 
-	static void UnregisterConCommand( const Entry_t &cmd )
+void ConCommandRegList::RegisterConCommand( const Entry_t &cmd )
+{
+	*cmd.m_Command = g_pCVar->RegisterConCommand( cmd.m_Info, s_nCVarFlag );
+	if(!cmd.m_Command->IsValidRef())
 	{
-		auto *pConCmd = cmd.m_Command;
-
-		Assert( pConCmd );
-
-		if ( !pConCmd->IsValidRef() )
-		{
-			Plat_FatalError( "UnregisterConCommand: Invalid con command \"%s\"!\n", cmd.m_Info.m_pszName );
-			DebuggerBreakIfDebugging();
-
-			return;
-		}
-
-		Assert( g_pCVar );
-		g_pCVar->UnregisterConCommandCallbacks( *pConCmd );
-		pConCmd->InvalidateRef();
+		Plat_FatalError( "RegisterConCommand: Unknown error registering con command \"%s\"!\n", cmd.m_Info.m_pszName );
+		DebuggerBreakIfDebugging();
 	}
+	else if(s_ConCommandRegCB)
+		s_ConCommandRegCB( cmd.m_Command );
+}
 
-	static void RegisterAll()
+void ConCommandRegList::RegisterAll()
+{
+	if(!s_bConCommandsRegistered && g_pCVar)
 	{
-		if ( s_bConCommandsRegistered )
-		{
-			return;
-		}
-
 		s_bConCommandsRegistered = true;
 
-		for ( auto list = s_pRoot; list; list = list->m_pPrev )
+		ConCommandRegList *prev = nullptr;
+		for(auto list = s_pRoot; list; list = prev)
 		{
-			for ( size_t i = 0; i < list->m_nSize; i++ )
+			for(size_t i = 0; i < list->m_nSize; i++)
 			{
 				RegisterConCommand( list->m_Entries[i] );
 			}
-		}
-	}
 
-	static void UnregisterAll()
+			prev = list->m_pPrev;
+		};
+	}
+}
+
+void ConCommandRegList::UnregisterAll()
+{
+	if(s_bConCommandsRegistered && g_pCVar)
 	{
-		for ( auto list = s_pRoot; list; list = list->m_pPrev )
+		s_bConCommandsRegistered = false;
+
+		ConCommandRegList *prev = nullptr;
+		for(auto list = s_pRoot; list; list = prev)
 		{
-			for ( size_t i = 0; i < list->m_nSize; i++ )
+			for(size_t i = 0; i < list->m_nSize; i++)
 			{
-				UnregisterConCommand( list->m_Entries[i] );
+				UnRegisterConCommand( list->m_Entries[i].m_Command );
 			}
-		}
-	}
 
-	static void AddToList( const Entry_t &cmd )
+			prev = list->m_pPrev;
+			delete list;
+		};
+
+		s_pRoot = nullptr;
+	}
+}
+
+void ConCommandRegList::AddToList( const Entry_t &cmd )
+{
+	if(s_bConCommandsRegistered)
 	{
-		if ( s_bConCommandsRegistered )
-		{
-			RegisterConCommand( cmd );
-
-			return;
-		}
-
-		auto list = s_pRoot;
-
-		if ( !list || list->m_nSize >= ARRAYSIZE( m_Entries ) )
-		{
-			list = new ConCommandRegList;
-			list->m_nSize = 0;
-			list->m_pPrev = s_pRoot;
-
-			s_pRoot = list;
-		}
-
-		list->m_Entries[list->m_nSize] = cmd;
-		list->m_nSize++;
+		RegisterConCommand( cmd );
+		return;
 	}
 
-private:
-	uint32 m_nSize;
-	Entry_t m_Entries[100];
-	ConCommandRegList *m_pPrev;
+	auto list = s_pRoot;
 
-public:
-	static bool s_bConCommandsRegistered;
-	static ConCommandRegList *s_pRoot;
-};
+	if(!list || list->m_nSize >= (sizeof( m_Entries ) / sizeof( m_Entries[0] )))
+	{
+		list = new ConCommandRegList;
+		list->m_nSize = 0;
+		list->m_pPrev = s_pRoot;
 
-bool ConCommandRegList::s_bConCommandsRegistered = false;
-ConCommandRegList *ConCommandRegList::s_pRoot = nullptr;
+		s_pRoot = list;
+	}
+
+	list->m_Entries[list->m_nSize++] = cmd;
+}
 
 void SetupConCommand( ConCommand *cmd, const ConCommandCreation_t& info )
 {
@@ -153,149 +135,95 @@ void SetupConCommand( ConCommand *cmd, const ConCommandCreation_t& info )
 	ConCommandRegList::AddToList( entry );
 }
 
-void DetroyConCommand( ConCommand *cmd )
-{
-	if (cmd->IsValidRef())
-	{
-		if (g_pCVar)
-			g_pCVar->UnregisterConCommandCallbacks( *cmd );
+bool ConVarRegList::s_bConVarsRegistered = false;
+ConVarRegList *ConVarRegList::s_pRoot = nullptr;
 
-		cmd->InvalidateRef();
+void UnRegisterConVar( ConVarRef *cvar )
+{
+	if(cvar->IsValidRef())
+	{
+		if(g_pCVar)
+			g_pCVar->UnregisterConVarCallbacks( *cvar );
+
+		cvar->InvalidateRef();
 	}
 }
 
-class ConVarRegList
+void ConVarRegList::RegisterConVar( const Entry_t &cvar )
 {
-public:
-	struct Entry_t
+	g_pCVar->RegisterConVar( cvar.m_Info, s_nCVarFlag, cvar.m_pConVar, cvar.m_pConVarData );
+	if(!cvar.m_pConVar->IsValidRef())
 	{
-		ConVarCreation_t m_Info;
-
-		ConVarRefAbstract *m_pConVar = nullptr;
-		ConVarData **m_pConVarData = nullptr;
-	};
-
-	static void RegisterConVar( const Entry_t &cvar )
-	{
-		Assert( g_pCVar );
-
-		ConVarRefAbstract hConVar = g_pCVar->FindConVar( cvar.m_Info.m_pszName );
-		if ( hConVar.IsValidRef() )
-		{
-			ConVarData* pConVarData = g_pCVar->GetConVarData( static_cast<ConVarRef>(hConVar) );
-			if (pConVarData->GetType() != cvar.m_Info.m_valueInfo.m_eVarType)
-			{
-				const char* cvarType = cvar.m_pConVar->GetConVarData()->GetDataTypeName();
-				const char* validType = pConVarData->GetDataTypeName();
-				Plat_FatalError( "RegisterConVar: Convar \"%s\" already exists with different type! (expected: %s, given: %s)\n",
-					cvar.m_Info.m_pszName, validType, cvarType );
-				DebuggerBreakIfDebugging();
-				return;
-			}
-		}
-
-		g_pCVar->RegisterConVar( cvar.m_Info, s_nCVarFlag, cvar.m_pConVar, cvar.m_pConVarData );
-
-		Assert( cvar.m_pConVar );
-		if ( !cvar.m_pConVar->IsValidRef() )
-		{
-			if ( !hConVar.IsValidRef() )
-			{
-				Plat_FatalError( "RegisterConVar: Unknown error registering convar \"%s\"!\n", cvar.m_Info.m_pszName );
-				DebuggerBreakIfDebugging();
-			}
-		}
-
-		// Don't let references pass as a newly registered cvar
-		if ( s_ConVarRegCB && (cvar.m_Info.m_nFlags & FCVAR_REFERENCE) == 0 )
-			s_ConVarRegCB( cvar.m_pConVar );
+		Plat_FatalError( "RegisterConVar: Unknown error registering convar \"%s\"!\n", cvar.m_Info.m_pszName );
+		DebuggerBreakIfDebugging();
 	}
+	// Don't let references pass as a newly registered cvar
+	else if(s_ConVarRegCB && (cvar.m_Info.m_nFlags & FCVAR_REFERENCE) == 0)
+		s_ConVarRegCB( cvar.m_pConVar );
+}
 
-	static void UnregisterConVar( const Entry_t &cvar )
+void ConVarRegList::RegisterAll()
+{
+	if(!s_bConVarsRegistered && g_pCVar)
 	{
-		auto *pConVar = cvar.m_pConVar;
-		Assert( pConVar );
-
-		if ( !pConVar->IsValidRef() )
-		{
-			Plat_FatalError( "UnregisterConVar: Invalid convar \"%s\"!\n", cvar.m_Info.m_pszName );
-			DebuggerBreakIfDebugging();
-			return;
-		}
-
-		Assert( g_pCVar );
-		g_pCVar->UnregisterConVarCallbacks( *pConVar );
-		pConVar->InvalidateRef();
-	}
-
-	static bool RegisterAll()
-	{
-		if ( s_bConVarsRegistered )
-		{
-			return false;
-		}
-
 		s_bConVarsRegistered = true;
 
-		for ( auto list = s_pRoot; list; list = list->m_pPrev )
+		ConVarRegList *prev = nullptr;
+		for(auto list = s_pRoot; list; list = prev)
 		{
 			for(size_t i = 0; i < list->m_nSize; i++)
 			{
 				RegisterConVar( list->m_Entries[i] );
 			}
-		}
 
-		return true;
+			prev = list->m_pPrev;
+		};
 	}
+}
 
-	static bool UnregisterAll()
+void ConVarRegList::UnregisterAll()
+{
+	if(s_bConVarsRegistered && g_pCVar)
 	{
-		for ( auto list = s_pRoot; list; list = list->m_pPrev )
+		s_bConVarsRegistered = false;
+
+		ConVarRegList *prev = nullptr;
+		for(auto list = s_pRoot; list; list = prev)
 		{
-			for ( size_t i = 0; i < list->m_nSize; i++ )
+			for(size_t i = 0; i < list->m_nSize; i++)
 			{
-				UnregisterConVar( list->m_Entries[i] );
+				UnRegisterConVar( list->m_Entries[i].m_pConVar );
 			}
-		}
 
-		return true;
+			prev = list->m_pPrev;
+			delete list;
+		};
+
+		s_pRoot = nullptr;
 	}
+}
 
-	static void AddToList( const Entry_t &cvar )
+void ConVarRegList::AddToList( const Entry_t &cvar )
+{
+	if(s_bConVarsRegistered)
 	{
-		if ( s_bConVarsRegistered )
-		{
-			RegisterConVar( cvar );
-
-			return;
-		}
-
-		auto list = s_pRoot;
-
-		if ( !list || list->m_nSize >= ARRAYSIZE( m_Entries ) )
-		{
-			list = new ConVarRegList;
-			list->m_nSize = 0;
-			list->m_pPrev = s_pRoot;
-
-			s_pRoot = list;
-		}
-
-		list->m_Entries[list->m_nSize++] = cvar;
+		RegisterConVar( cvar );
+		return;
 	}
 
-private:
-	uint32 m_nSize;
-	Entry_t m_Entries[100];
-	ConVarRegList *m_pPrev;
+	auto list = s_pRoot;
 
-public:
-	static bool s_bConVarsRegistered;
-	static ConVarRegList *s_pRoot;
-};
+	if(!list || list->m_nSize >= (sizeof( m_Entries ) / sizeof( m_Entries[0] )))
+	{
+		list = new ConVarRegList;
+		list->m_nSize = 0;
+		list->m_pPrev = s_pRoot;
 
-bool ConVarRegList::s_bConVarsRegistered = false;
-ConVarRegList *ConVarRegList::s_pRoot = nullptr;
+		s_pRoot = list;
+	}
+
+	list->m_Entries[list->m_nSize++] = cvar;
+}
 
 void SetupConVar( ConVarRefAbstract *cvar, ConVarData **cvar_data, ConVarCreation_t &info )
 {
@@ -305,17 +233,6 @@ void SetupConVar( ConVarRefAbstract *cvar, ConVarData **cvar_data, ConVarCreatio
 	entry.m_pConVarData = cvar_data;
 
 	ConVarRegList::AddToList( entry );
-}
-
-void DestroyConVar( ConVarRef *cvar )
-{
-	if ( cvar->IsValidRef() )
-	{
-		if ( g_pCVar )
-			g_pCVar->UnregisterConVarCallbacks( *cvar );
-
-		cvar->InvalidateRef();
-	}
 }
 
 uint64 SanitiseConVarFlags( uint64 flags )
@@ -340,11 +257,11 @@ uint64 SanitiseConVarFlags( uint64 flags )
 //-----------------------------------------------------------------------------
 // Called by the framework to register ConCommandBases with the ICVar
 //-----------------------------------------------------------------------------
-bool ConVar_Register( uint64 nCVarFlag, FnConVarRegisterCallback cvar_reg_cb, FnConCommandRegisterCallback cmd_reg_cb )
+void ConVar_Register( uint64 nCVarFlag, FnConVarRegisterCallback cvar_reg_cb, FnConCommandRegisterCallback cmd_reg_cb )
 {
 	if ( !g_pCVar || s_bRegistered )
 	{
-		return false;
+		return;
 	}
 
 	s_bRegistered = true;
@@ -354,24 +271,20 @@ bool ConVar_Register( uint64 nCVarFlag, FnConVarRegisterCallback cvar_reg_cb, Fn
 
 	ConCommandRegList::RegisterAll();
 	ConVarRegList::RegisterAll();
-
-	return true;
 }
 
-uint64 ConVar_GetDefaultFlags()
+void ConVar_Unregister( )
 {
-	return s_nCVarFlag;
-}
+	if ( !g_pCVar || !s_bRegistered )
+		return;
 
-bool ConVar_Unregister( )
-{
-	if ( !g_pCVar )
-		return false;
+	s_bRegistered = false;
+	s_nCVarFlag = FCVAR_NONE;
+	s_ConVarRegCB = nullptr;
+	s_ConCommandRegCB = nullptr;
 
 	ConCommandRegList::UnregisterAll();
 	ConVarRegList::UnregisterAll();
-
-	return true;
 }
 
 
@@ -390,18 +303,25 @@ CCommand::CCommand( int nArgC, const char **ppArgV ) : CCommand()
 
 	char *pBuf = m_ArgvBuffer.Base();
 	char *pSBuf = m_ArgSBuffer.Base();
+	const char *pBufEnd = pBuf + m_ArgvBuffer.Count();
+	const char *pSBufEnd = pSBuf + m_ArgSBuffer.Count();
 	for ( int i = 0; i < nArgC; ++i )
 	{
-		m_Args.AddToTail( pBuf );
 		int nLen = V_strlen( ppArgV[i] );
-		memcpy( pBuf, ppArgV[i], nLen+1 );
-		if ( i == 0 )
+		bool bContainsSpace = strchr( ppArgV[i], ' ' ) != NULL;
+
+		// Each argument is followed by a separator or the terminator in the ArgS buffer
+		if ( nLen + 1 > pBufEnd - pBuf || nLen + ( bContainsSpace ? 2 : 0 ) + 1 > pSBufEnd - pSBuf )
 		{
-			m_nArgv0Size = nLen;
+			Warning( "CCommand::CCommand: Encountered command which overflows the tokenizer buffer.. Skipping!\n" );
+			Reset();
+			return;
 		}
+
+		m_Args.AddToTail( pBuf );
+		memcpy( pBuf, ppArgV[i], nLen+1 );
 		pBuf += nLen+1;
 
-		bool bContainsSpace = strchr( ppArgV[i], ' ' ) != NULL;
 		if ( bContainsSpace )
 		{
 			*pSBuf++ = '\"';
@@ -417,7 +337,14 @@ CCommand::CCommand( int nArgC, const char **ppArgV ) : CCommand()
 		{
 			*pSBuf++ = ' ';
 		}
+
+		if ( i == 0 && nArgC > 1 )
+		{
+			m_nArgv0Size = pSBuf - m_ArgSBuffer.Base();
+		}
 	}
+
+	*pSBuf = '\0';
 }
 
 void CCommand::EnsureBuffers()
@@ -431,6 +358,9 @@ void CCommand::Reset()
 	m_nArgv0Size = 0;
 	m_ArgSBuffer.Base()[0] = '\0';
 	m_Args.RemoveAll();
+	m_unk101 = false;
+	m_flInputTime = std::numeric_limits<double>::quiet_NaN();
+	m_unk201 = 0;
 }
 
 characterset_t* CCommand::DefaultBreakSet()
@@ -438,14 +368,14 @@ characterset_t* CCommand::DefaultBreakSet()
 	return g_pCVar->GetCharacterSet();
 }
 
-bool CCommand::Tokenize( const char *pCommand, const characterset_t *pBreakSet )
+bool CCommand::Tokenize( CUtlString pCommand, characterset_t *pBreakSet )
 {
 	if(m_ArgSBuffer.Count() == 0)
 		EnsureBuffers();
 
 	Reset();
 
-	if ( !pCommand || !*pCommand )
+	if ( pCommand.IsEmpty() )
 		return false;
 
 	// Use default break set
@@ -457,7 +387,7 @@ bool CCommand::Tokenize( const char *pCommand, const characterset_t *pBreakSet )
 	// Copy the current command into a temp buffer
 	// NOTE: This is here to avoid the pointers returned by DequeueNextCommand
 	// to become invalid by calling AddText. Is there a way we can avoid the memcpy?
-	int nLen = V_strlen( pCommand );
+	int nLen = pCommand.Length();
 	if ( nLen >= m_ArgSBuffer.Count() - 1 )
 	{
 		Warning( "CCommand::Tokenize: Encountered command which overflows the tokenizer buffer.. Skipping!\n" );
@@ -467,14 +397,14 @@ bool CCommand::Tokenize( const char *pCommand, const characterset_t *pBreakSet )
 	memmove( m_ArgSBuffer.Base(), pCommand, nLen + 1 );
 
 	// Parse the current command into the current command buffer
-	CUtlBuffer bufParse( m_ArgSBuffer.Base(), nLen, static_cast<CUtlBuffer::BufferFlags_t>(CUtlBuffer::TEXT_BUFFER | CUtlBuffer::READ_ONLY) );
+	CUtlBuffer bufParse( m_ArgSBuffer.Base(), nLen, CUtlBuffer::TEXT_BUFFER | CUtlBuffer::READ_ONLY);
 	int nArgvBufferSize = 0;
 	while ( bufParse.IsValid() )
 	{
 		char *pArgvBuf = &m_ArgvBuffer[nArgvBufferSize];
 		int nMaxLen = m_ArgvBuffer.Count() - nArgvBufferSize;
 		int nStartGet = bufParse.TellGet();
-		int	nSize = bufParse.ParseToken( pBreakSet, pArgvBuf, nMaxLen, true );
+		int	nSize = bufParse.ParseToken( pBreakSet, pArgvBuf, nMaxLen );
 		if ( nSize < 0 )
 			break;
 
@@ -509,7 +439,7 @@ bool CCommand::Tokenize( const char *pCommand, const characterset_t *pBreakSet )
 
 		m_Args.AddToTail( pArgvBuf );
 		nArgvBufferSize += nSize + 1;
-
+		
 		if(nArgvBufferSize >= m_ArgvBuffer.Count())
 			break;
 	}
@@ -573,7 +503,7 @@ void ConCommand::Create( const char* pName, const ConCommandCallbackInfo_t &cb, 
 
 void ConCommand::Destroy()
 {
-	DetroyConCommand( this );
+	UnRegisterConCommand( this );
 }
 
 //-----------------------------------------------------------------------------
@@ -585,7 +515,7 @@ void ConCommand::Destroy()
 int ConVarData::GetMaxSplitScreenSlots() const
 {
 	if((m_nFlags & FCVAR_PER_USER) != 0)
-		return static_cast<CCvar *>( g_pCVar )->GetMaxSplitScreenSlots();
+		return g_pCVar->GetMaxSplitScreenSlots();
 
 	return 1;
 }
@@ -623,7 +553,7 @@ void ConVarData::MinValueToString( CBufferString &buf ) const
 	if(HasMinValue())
 		TypeTraits()->ValueToString( m_minValue, buf );
 	else
-		buf.Clear();
+		buf.Insert( 0, "" );
 }
 
 void ConVarData::MaxValueToString( CBufferString &buf ) const
@@ -631,24 +561,22 @@ void ConVarData::MaxValueToString( CBufferString &buf ) const
 	if(HasMaxValue())
 		TypeTraits()->ValueToString( m_maxValue, buf );
 	else
-		buf.Clear();
+		buf.Insert( 0, "" );
 }
 
 ConVarRef::ConVarRef( const char *name, bool allow_developer )
- :  m_ConVar{ kInvalidAccessIndex, 0 }
 {
-	if ( g_pCVar )
-		*this = g_pCVar->FindConVar( name, allow_developer );
+	*this = g_pCVar->FindConVar( name, allow_developer );
 }
 
 void ConVarRefAbstract::Init( ConVarRef ref, EConVarType type )
 {
 	m_ConVarData = nullptr;
 
-	if ( g_pCVar )
+	if(g_pCVar)
 		m_ConVarData = g_pCVar->GetConVarData( ref );
 	
-	if( !m_ConVarData )
+	if(!m_ConVarData)
 		InvalidateConVarData( type );
 }
 
@@ -667,11 +595,8 @@ void ConVarRefAbstract::CallChangeCallbacks( CSplitScreenSlot slot, CVValue_t *n
 	if(slot.Get() == -1)
 		slot = CSplitScreenSlot( 0 );
 
-	if( g_pCVar )
-	{
-		g_pCVar->CallChangeCallback( *this, slot, new_value, prev_value );
-		g_pCVar->CallGlobalChangeCallbacks( this, slot, new_str, prev_str );
-	}
+	g_pCVar->CallChangeCallback( *this, slot, new_value, prev_value );
+	g_pCVar->CallGlobalChangeCallbacks( this, slot, new_str, prev_str );
 }
 
 void ConVarRefAbstract::SetOrQueueValueInternal( CSplitScreenSlot slot, CVValue_t *value )

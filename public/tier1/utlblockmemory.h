@@ -29,8 +29,8 @@
 //-----------------------------------------------------------------------------
 
 #ifdef UTBLOCKLMEMORY_TRACK
-#define UTLBLOCKMEMORY_TRACK_ALLOC()		MemAlloc_RegisterAllocation( "||Sum of all UtlBlockMemory||", 0, NumAllocated() * sizeof(T), NumAllocated() * sizeof(T), 0 )
-#define UTLBLOCKMEMORY_TRACK_FREE()		if ( !m_pMemory ) ; else MemAlloc_RegisterDeallocation( "||Sum of all UtlBlockMemory||", 0, NumAllocated() * sizeof(T), NumAllocated() * sizeof(T), 0 )
+#define UTLBLOCKMEMORY_TRACK_ALLOC()		MemAlloc_RegisterAllocation( "Sum of all UtlBlockMemory", 0, NumAllocated() * sizeof(T), NumAllocated() * sizeof(T), 0 )
+#define UTLBLOCKMEMORY_TRACK_FREE()		if ( !m_pMemory ) ; else MemAlloc_RegisterDeallocation( "Sum of all UtlBlockMemory", 0, NumAllocated() * sizeof(T), NumAllocated() * sizeof(T), 0 )
 #else
 #define UTLBLOCKMEMORY_TRACK_ALLOC()		((void)0)
 #define UTLBLOCKMEMORY_TRACK_FREE()		((void)0)
@@ -52,7 +52,7 @@ public:
 	// Set the size by which the memory grows - round up to the next power of 2
 	void Init( int nGrowSize = 0, int nInitSize = 0 );
 
-	// here to match CUtlMemory, but only used by ResetDbgInfo, so it can just return NULL
+	// here to match CUtlVectorMemory_Growable, but not used, so it can just return NULL
 	T* Base() { return NULL; }
 	const T* Base() const { return NULL; }
 
@@ -139,8 +139,18 @@ void CUtlBlockMemory<T,I>::Swap( CUtlBlockMemory< T, I > &mem )
 {
 	V_swap( m_pMemory, mem.m_pMemory );
 	V_swap( m_nBlocks, mem.m_nBlocks );
-	V_swap( (int &)(m_nIndexMask), (int &)mem.m_nIndexMask );
-	V_swap( (int &)m_nIndexShift, (int &)mem.m_nIndexShift );
+
+	{
+		int temp = m_nIndexMask;
+		m_nIndexMask = mem.m_nIndexMask;
+		mem.m_nIndexMask = temp;
+	}
+
+	{
+		int temp = m_nIndexShift;
+		m_nIndexShift = mem.m_nIndexShift;
+		mem.m_nIndexShift = temp;
+	}
 }
 
 
@@ -336,7 +346,7 @@ void CUtlBlockMemory<T,I>::Purge( int numElements )
 	}
 
 	int nBlockSize = NumElementsInBlock();
-	int nBlocksOld = m_nBlocks;
+	// int nBlocksOld = m_nBlocks;
 	int nBlocks = ( numElements + nBlockSize - 1 ) / nBlockSize;
 
 	// If the number of blocks is the same as the allocated number of blocks, we are done.

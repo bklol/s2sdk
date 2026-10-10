@@ -1,4 +1,4 @@
-//========= Copyright � 2011, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: common helpers for reuse among various Utl containers
 //
@@ -10,9 +10,8 @@
 #define UTLCOMMON_H
 #pragma once
 
-#include "tier0/strtools.h"
-
-#include <type_traits>
+#include "utlstring.h"
+#include "type_traits"
 
 //-----------------------------------------------------------------------------
 // Henry Goffin (henryg) was here. Questions? Bugs? Go slap him around a bit.
@@ -81,7 +80,7 @@ class CUtlKeyValuePair<K, empty_t>
 {
 public:
 	typedef const K ValueReturn_t;
-	K m_key{};
+	K m_key;
 
 	CUtlKeyValuePair() {}
 
@@ -123,83 +122,19 @@ template <typename T> struct ArgumentTypeInfo;
 
 
 // Some fundamental building-block functors...
-struct StringLessFunctor 
-{ 
-	StringLessFunctor( int i ) {};
-	StringLessFunctor( void ) {};
-	inline bool operator!() const { return false; }
+struct StringLessFunctor { bool operator()( const char *a, const char *b ) const { return Q_strcmp( a, b ) < 0; } };
+struct StringEqualFunctor { bool operator()( const char *a, const char *b ) const { return Q_strcmp( a, b ) == 0; } };
+struct CaselessStringLessFunctor { bool operator()( const char *a, const char *b ) const { return Q_strcasecmp( a, b ) < 0; } };
+struct CaselessStringEqualFunctor { bool operator()( const char *a, const char *b ) const { return Q_strcasecmp( a, b ) == 0; } };
 
-	bool operator()( const char *a, const char *b ) const 
-	{ 
-		return V_strcmp( a, b ) < 0; 
-	} 
-};
-struct StringEqualFunctor { bool operator()( const char *a, const char *b ) const { return V_strcmp( a, b ) == 0; } };
-struct CaselessStringLessFunctor { bool operator()( const char *a, const char *b ) const { return V_strcasecmp( a, b ) < 0; } };
-struct CaselessStringEqualFunctor { bool operator()( const char *a, const char *b ) const { return V_strcasecmp( a, b ) == 0; } };
-
-struct IdentityHashFunctor { unsigned int operator() ( uint32 s ) const { return s; } };
 struct Mix32HashFunctor { unsigned int operator()( uint32 s ) const; };
-struct Mix64HashFunctor { unsigned int operator()( uint64 s ) const; };
 struct StringHashFunctor { unsigned int operator()( const char* s ) const; };
 struct CaselessStringHashFunctor { unsigned int operator()( const char* s ) const; };
 
 struct PointerLessFunctor { bool operator()( const void *a, const void *b ) const { return a < b; } };
 struct PointerEqualFunctor { bool operator()( const void *a, const void *b ) const { return a == b; } };
-#if defined( PLATFORM_64BITS )
-struct PointerHashFunctor { unsigned int operator()( const void* s ) const { return Mix64HashFunctor()( ( uintp ) s ); } };
-#else
-struct PointerHashFunctor { unsigned int operator()( const void* s ) const { return Mix32HashFunctor()( ( uintp ) s ); } };
-#endif
+struct PointerHashFunctor { unsigned int operator()( const void* s ) const { return Mix32HashFunctor()((uint32)POINTER_TO_INT(s)); } };
 
-//-----------------------------------------------------------------------------
-// Purpose: Implementation of low-level string functionality for character types.
-//-----------------------------------------------------------------------------
-
-template < typename T >
-class StringFuncs
-{
-public:
-	static T		*Duplicate( const T *pValue );
-	// Note that this function takes a character count, and does not guarantee null-termination.
-	static void		 Copy( T *out_pOut, const T *pIn, int iLengthInChars );
-	static int		 Compare( const T *pLhs, const T *pRhs );
-	static int		 CaselessCompare( const T *pLhs, const T *pRhs );
-	static int		 Length( const T *pValue );
-	static const T  *FindChar( const T *pStr, const T cSearch );
-	static const T	*EmptyString();
-	static const T	*NullDebugString();
-};
-
-template < >
-class StringFuncs<char>
-{
-public:
-	static char		  *Duplicate( const char *pValue ) { return strdup( pValue ); }
-	// Note that this function takes a character count, and does not guarantee null-termination.
-	static void		   Copy( char *out_pOut, const char *pIn, int iLengthInChars ) { strncpy( out_pOut, pIn, iLengthInChars ); }
-	static int		   Compare( const char *pLhs, const char *pRhs ) { return strcmp( pLhs, pRhs ); }
-	static int		   CaselessCompare( const char *pLhs, const char *pRhs ) { return Q_strcasecmp( pLhs, pRhs ); }
-	static int		   Length( const char *pValue ) { return (int)strlen( pValue ); }
-	static const char *FindChar( const char *pStr, const char cSearch ) { return strchr( pStr, cSearch ); }
-	static const char *EmptyString() { return ""; }
-	static const char *NullDebugString() { return "(null)"; }
-};
-
-template < >
-class StringFuncs<wchar_t>
-{
-public:
-	static wchar_t		 *Duplicate( const wchar_t *pValue ) { return wcsdup( pValue ); }
-	// Note that this function takes a character count, and does not guarantee null-termination.
-	static void			  Copy( wchar_t *out_pOut, const wchar_t  *pIn, int iLengthInChars ) { wcsncpy( out_pOut, pIn, iLengthInChars ); }
-	static int			  Compare( const wchar_t *pLhs, const wchar_t *pRhs ) { return wcscmp( pLhs, pRhs ); }
-	static int			  CaselessCompare( const wchar_t *pLhs, const wchar_t *pRhs ); // no implementation?
-	static int			  Length( const wchar_t *pValue ) { return (int)wcslen( pValue ); }
-	static const wchar_t *FindChar( const wchar_t *pStr, const wchar_t cSearch ) { return wcschr( pStr, cSearch ); }
-	static const wchar_t *EmptyString() { return L""; }
-	static const wchar_t *NullDebugString() { return L"(null)"; }
-};
 
 // Generic implementation of Less and Equal functors
 template < typename T >
@@ -218,8 +153,6 @@ struct DefaultEqualFunctor
 	bool operator()( typename ArgumentTypeInfo< T >::Arg_t a, typename ArgumentTypeInfo< T >::Alt_t b ) const { return a == b; }
 };
 
-class CUtlStringToken;
-
 // Hashes for basic types
 template <> struct DefaultHashFunctor<char> : Mix32HashFunctor { };
 template <> struct DefaultHashFunctor<signed char> : Mix32HashFunctor { };
@@ -228,18 +161,11 @@ template <> struct DefaultHashFunctor<signed short> : Mix32HashFunctor { };
 template <> struct DefaultHashFunctor<unsigned short> : Mix32HashFunctor { };
 template <> struct DefaultHashFunctor<signed int> : Mix32HashFunctor { };
 template <> struct DefaultHashFunctor<unsigned int> : Mix32HashFunctor { };
-#if !defined(PLATFORM_64BITS) || defined(_WIN32)
 template <> struct DefaultHashFunctor<signed long> : Mix32HashFunctor { };
 template <> struct DefaultHashFunctor<unsigned long> : Mix32HashFunctor { };
-#elif defined(POSIX)
-template <> struct DefaultHashFunctor<signed long> : Mix64HashFunctor { };
-template <> struct DefaultHashFunctor<unsigned long> : Mix64HashFunctor { };
-#endif
-template <> struct DefaultHashFunctor<signed long long> : Mix64HashFunctor { };
-template <> struct DefaultHashFunctor<unsigned long long> : Mix64HashFunctor { };
 template <> struct DefaultHashFunctor<void*> : PointerHashFunctor { };
 template <> struct DefaultHashFunctor<const void*> : PointerHashFunctor { };
-template <> struct DefaultHashFunctor<CUtlStringToken> : Mix32HashFunctor { };
+template <> struct DefaultHashFunctor<CUtlStringToken> { unsigned int operator()( const CUtlStringToken &k ) const { return k.GetHashCode(); } };
 #if !defined(_MSC_VER) || defined(_NATIVE_WCHAR_T_DEFINED)
 template <> struct DefaultHashFunctor<wchar_t> : Mix32HashFunctor { };
 #endif
@@ -261,7 +187,6 @@ template < typename T > class CUtlConstStringBase;
 
 template <> struct DefaultLessFunctor<CUtlString> : StringLessFunctor { };
 template <> struct DefaultHashFunctor<CUtlString> : StringHashFunctor { };
-template <> struct DefaultEqualFunctor<CUtlString> : StringEqualFunctor {};
 template < typename T > struct DefaultLessFunctor< CUtlConstStringBase<T> > : StringLessFunctor { };
 template < typename T > struct DefaultHashFunctor< CUtlConstStringBase<T> > : StringHashFunctor { };
 
@@ -393,20 +318,6 @@ inline unsigned int Mix32HashFunctor::operator()( uint32 n ) const
 	n = ( n ^ 0xb55a4f09 ) ^ ( n >> 16 );
 	return n;
 }
-
-inline unsigned int Mix64HashFunctor::operator()( uint64 s ) const 
-{
-	// Thomas Wang hash, http://www.concentric.net/~ttwang/tech/inthash.htm
-	s = ( ~s ) + ( s << 21 ); // s = (s << 21) - s - 1;
-	s = s ^ ( s >> 24 );
-	s = (s + ( s << 3 ) ) + ( s << 8 ); // s * 265
-	s = s ^ ( s >> 14 );
-	s = ( s + ( s << 2 ) ) + ( s << 4 ); // s * 21
-	s = s ^ ( s >> 28 );
-	s = s + ( s << 31 );
-	return (unsigned int)s;
-}
-
 
 // Based on the widely-used FNV-1A string hash with a final
 // mixing step to improve dispersion for very small and very

@@ -28,7 +28,7 @@
 #endif
 
 #if defined( _MEMTEST )
-#if defined( _WIN32 ) || defined( _PS3 )
+#ifdef _WIN32
 #define USE_MEM_DEBUG 1
 #endif
 #endif
@@ -42,16 +42,7 @@
 
 #include "platform.h"
 #include <stddef.h>
-#ifdef _LINUX
-#ifndef offsetof
-#ifdef GNUC
-#define offsetof( type, var ) __builtin_offsetof( type, var )
-#else
-#include <stddef.h>
-#define offsetof(s,m)	(size_t)&(((s *)0)->m)
-#endif
-#endif
-#elif defined( OSX )
+#if defined( OSX )
 #include <malloc/malloc.h>
 #endif
 
@@ -143,8 +134,8 @@ public:
 	virtual void *ReallocAligned( void *pMem, size_t nSize, size_t align ) = 0;
 	virtual void FreeAligned( void *pMem ) = 0;
 
-	FORCEINLINE void *IndirectAlloc( size_t nSize ) { return Alloc( nSize ); }
-	FORCEINLINE void *IndirectAllocAligned( size_t nSize, size_t align ) { return AllocAligned( nSize, align ); }
+	inline void *IndirectAlloc( size_t nSize ) { return Alloc( nSize ); }
+	inline void *IndirectAllocAligned( size_t nSize, size_t align ) { return AllocAligned( nSize, align ); }
 
 	// AMNOTE: It's unclear if the functions below are actually a debug variants, as in binaries they are
 	// absolutely the same to the above functions, but with a different name as they aren't merged together
@@ -264,20 +255,7 @@ public:
 //-----------------------------------------------------------------------------
 // Singleton interface
 //-----------------------------------------------------------------------------
-#ifdef _PS3
-
-PLATFORM_INTERFACE IMemAlloc* g_pMemAllocInternalPS3;
-#ifndef PLATFORM_INTERFACE_MEM_ALLOC_INTERNAL_PS3_OVERRIDE
-#define g_pMemAlloc g_pMemAllocInternalPS3
-#else
-#define g_pMemAlloc PLATFORM_INTERFACE_MEM_ALLOC_INTERNAL_PS3_OVERRIDE
-#endif
-
-#else // !_PS3
-
-MEM_INTERFACE IMemAlloc* g_pMemAlloc;
-
-#endif
+MEM_INTERFACE IMemAlloc *g_pMemAlloc;
 
 //-----------------------------------------------------------------------------
 
@@ -285,32 +263,32 @@ MEM_INTERFACE IMemAlloc* g_pMemAlloc;
 #ifndef MEMALLOC_REGION
 #define MEMALLOC_REGION 0
 #endif
-FORCEINLINE void *MemAlloc_Alloc( size_t nSize )
+inline void *MemAlloc_Alloc( size_t nSize )
 { 
 	return g_pMemAlloc->RegionAlloc( MEMALLOC_REGION, nSize );
 }
 
-FORCEINLINE void *MemAlloc_Alloc( size_t nSize, const char *pFileName, int nLine )
+inline void *MemAlloc_Alloc( size_t nSize, const char *pFileName, int nLine )
 { 
 	return g_pMemAlloc->RegionAlloc( MEMALLOC_REGION, nSize, pFileName, nLine );
 }
 #else
 #undef MEMALLOC_REGION
-FORCEINLINE void *MemAlloc_Alloc( size_t nSize )
+inline void *MemAlloc_Alloc( size_t nSize )
 { 
 	return g_pMemAlloc->IndirectAlloc( nSize );
 }
 
-FORCEINLINE void *MemAlloc_Alloc( size_t nSize, const char *pFileName, int nLine )
+inline void *MemAlloc_Alloc( size_t nSize, const char *pFileName, int nLine )
 { 
 	return g_pMemAlloc->IndirectAlloc( nSize /*, pFileName, nLine*/ );
 }
 #endif
-FORCEINLINE void MemAlloc_Free( void *ptr )
+inline void MemAlloc_Free( void *ptr )
 {
 	g_pMemAlloc->Free( ptr );
 }
-FORCEINLINE void MemAlloc_Free( void *ptr, const char *pFileName, int nLine )
+inline void MemAlloc_Free( void *ptr, const char *pFileName, int nLine )
 {
 	g_pMemAlloc->Free( ptr /*, pFileName, nLine*/ );
 }
@@ -341,8 +319,8 @@ inline void *MemAlloc_AllocAlignedFileLine( size_t size, size_t align, const cha
 #ifdef USE_MEM_DEBUG
 #define MemAlloc_AllocAligned( s, a )	MemAlloc_AllocAlignedFileLine( s, a, __FILE__, __LINE__ )
 #elif defined(USE_LIGHT_MEM_DEBUG)
-extern const char* GetModuleName();
-#define MemAlloc_AllocAligned( s, a )	MemAlloc_AllocAlignedFileLine( s, a, GetModuleName(), 0 )
+extern const char *g_pszModule; 
+#define MemAlloc_AllocAligned( s, a )	MemAlloc_AllocAlignedFileLine( s, a, g_pszModule, 0 )
 #else
 #define MemAlloc_AllocAligned( s, a )	MemAlloc_AllocAlignedUnattributed( s, a )
 #endif
@@ -436,50 +414,6 @@ public:
 	}
 };
 
-#include "memdbgon.h"
-
-class CMemAllocAllocator
-{
-public:
-	template< typename T, typename I = int >
-	static T *Alloc( I nCount, I &nAdjustedCount )
-	{
-		T *pNew = reinterpret_cast< T * >( g_pMemAlloc->IndirectAlloc( nCount * sizeof( T ) ) );
-		nAdjustedCount = GetAdjustedCount< T, I >( pNew, nCount );
-		return pNew;
-	}
-
-	template< typename T, typename I = int >
-	static T *Realloc( T *pMem, I nCount, I &nAdjustedCount )
-	{
-		T *pReallocated = reinterpret_cast< T * >( g_pMemAlloc->Realloc( pMem, nCount * sizeof( T ) ) );
-		nAdjustedCount = GetAdjustedCount< T, I >( pReallocated, nCount );
-		return pReallocated;
-	}
-
-	static void Free( void* pMem )
-	{
-		if ( pMem )
-			g_pMemAlloc->Free( pMem );
-	}
-
-	static size_t GetSize( void *pMem )
-	{
-		return _msize( pMem );
-	}
-
-	template< typename T, typename I = int >
-	static I GetAdjustedCount( void *pMem, I nCount )
-	{
-		size_t nSize = nCount * sizeof( T );
-		size_t nMemSize = GetSize( pMem );
-
-		return ( I )( ( ( nMemSize > nSize ) ? nMemSize : nSize ) / sizeof( T ) );
-	}
-};
-
-#include "memdbgoff.h"
-
 #define MEM_ALLOC_CREDIT()	MEM_ALLOC_CREDIT_(__FILE__)
 
 //-----------------------------------------------------------------------------
@@ -532,15 +466,12 @@ struct MemAllocFileLine_t
 };
 
 #define MEMALLOC_DEFINE_EXTERNAL_TRACKING( tag ) \
-	static CUtlMap<void *, MemAllocFileLine_t, int> s_##tag##Allocs( DefLessFunc( void *) ); \
-	CUtlMap<void *, MemAllocFileLine_t, int> * g_p##tag##Allocs = &s_##tag##Allocs; \
-	static CThreadFastMutex s_##tag##AllocsMutex; \
-	CThreadFastMutex * g_p##tag##AllocsMutex = &s_##tag##AllocsMutex; \
+	static CUtlOrderedMap<void *, MemAllocFileLine_t> s_##tag##Allocs; \
+	CUtlOrderedMap<void *, MemAllocFileLine_t> * g_p##tag##Allocs = &s_##tag##Allocs; \
 	const char * g_psz##tag##Alloc = strcpy( (char *)MemAlloc_Alloc( strlen( #tag "Alloc" ) + 1, "intentional leak", 0 ), #tag "Alloc" );
 
 #define MEMALLOC_DECLARE_EXTERNAL_TRACKING( tag ) \
-	extern CUtlMap<void *, MemAllocFileLine_t, int> * g_p##tag##Allocs; \
-	extern CThreadFastMutex *g_p##tag##AllocsMutex; \
+	extern CUtlOrderedMap<void *, MemAllocFileLine_t> * g_p##tag##Allocs; \
 	extern const char * g_psz##tag##Alloc;
 
 #define MemAlloc_RegisterExternalAllocation( tag, p, size ) \
@@ -548,7 +479,6 @@ struct MemAllocFileLine_t
 		; \
 	else \
 	{ \
-		AUTO_LOCK_FM( *g_p##tag##AllocsMutex ); \
 		MemAllocFileLine_t fileLine = { g_psz##tag##Alloc, 0 }; \
 		g_pMemAlloc->GetActualDbgInfo( fileLine.pszFile, fileLine.line ); \
 		if ( fileLine.pszFile != g_psz##tag##Alloc ) \
@@ -564,10 +494,9 @@ struct MemAllocFileLine_t
 		; \
 	else \
 	{ \
-		AUTO_LOCK_FM( *g_p##tag##AllocsMutex ); \
 		MemAllocFileLine_t fileLine = { g_psz##tag##Alloc, 0 }; \
-		CUtlMap<void *, MemAllocFileLine_t, int>::IndexType_t iRecordedFileLine = g_p##tag##Allocs->Find( p ); \
-		if ( iRecordedFileLine != g_p##tag##Allocs->InvalidIndex() ) \
+		CUtlOrderedMap<void *, MemAllocFileLine_t>::IndexType_t iRecordedFileLine = g_p##tag##Allocs->Find( p ); \
+		if ( iRecordedFileLine !=  g_p##tag##Allocs->InvalidIndex() ) \
 		{ \
 			fileLine = (*g_p##tag##Allocs)[iRecordedFileLine]; \
 			g_p##tag##Allocs->RemoveAt( iRecordedFileLine ); \
@@ -637,8 +566,6 @@ inline void *MemAlloc_ReallocAligned( void *ptr, size_t size, size_t align )
 //-----------------------------------------------------------------------------
 
 #if !defined(STEAM) && defined(NO_MALLOC_OVERRIDE)
-#include <malloc.h>
-
 #define MEM_ALLOC_CREDIT_(tag)	((void)0)
 #define MEM_ALLOC_CREDIT()	MEM_ALLOC_CREDIT_(__FILE__)
 #define MEM_ALLOC_CREDIT_FUNCTION()
@@ -647,20 +574,6 @@ inline void *MemAlloc_ReallocAligned( void *ptr, size_t size, size_t align )
 
 #define MemAlloc_PushAllocDbgInfo( pszFile, line )
 #define MemAlloc_PopAllocDbgInfo()
-#define MemAlloc_RegisterAllocation( pFileName, nLine, nLogicalSize, nActualSize, nTime ) ((void)0)
-#define MemAlloc_RegisterDeallocation( pFileName, nLine, nLogicalSize, nActualSize, nTime ) ((void)0)
-#define MemAlloc_DumpStats() ((void)0)
-#define MemAlloc_CompactHeap() ((void)0)
-#define MemAlloc_OutOfMemory() ((void)0)
-#define MemAlloc_CompactIncremental() ((void)0)
-#define MemAlloc_DumpStatsFileBase( _filename ) ((void)0)
-inline bool MemAlloc_CrtCheckMemory() { return true; }
-inline void MemAlloc_GlobalMemoryStatus(size_t* pusedMemory, size_t* pfreeMemory)
-{
-	*pusedMemory = 0;
-	*pfreeMemory = 0;
-}
-#define MemAlloc_MemoryAllocFailed() 1
 
 #define MEMALLOC_DEFINE_EXTERNAL_TRACKING( tag )
 #define MemAlloc_RegisterExternalAllocation( tag, p, size ) ((void)0)

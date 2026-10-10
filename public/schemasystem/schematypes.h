@@ -1,17 +1,15 @@
 #ifndef SCHEMATYPES_H
 #define SCHEMATYPES_H
 
-#include "datamap.h"
 #ifdef _WIN32
 #pragma once
 #endif
 
 #include "tier0/logging.h"
 #include "tier0/threadtools.h"
-#include "tier0/strtools.h"
-#include "tier0/utlstring.h"
 #include "tier1/generichash.h"
 #include "tier1/utlmap.h"
+#include "tier1/utlstring.h"
 
 class ISchemaSystemTypeScope;
 class CSchemaSystemTypeScope;
@@ -19,6 +17,7 @@ class CSchemaClassInfo;
 class CSchemaEnumInfo;
 class CBufferString;
 struct SchemaAtomicTypeInfo_t;
+struct datamap_t;
 
 template <typename T>
 struct SchemaTypeMap {};
@@ -36,15 +35,12 @@ enum SchemaClassFlags1_t : uint32
 	SCHEMA_CF1_IS_ABSTRACT = (1 << 1),
 	SCHEMA_CF1_HAS_TRIVIAL_CONSTRUCTOR = (1 << 2),
 	SCHEMA_CF1_HAS_TRIVIAL_DESTRUCTOR = (1 << 3),
-
-#if defined(CS2) || defined(DOTA2) || defined(DEADLOCK)
 	SCHEMA_CF1_LIMITED_METADATA = (1 << 4),
 	SCHEMA_CF1_INHERITANCE_DEPTH_CALCULATED = (1 << 5),
 	SCHEMA_CF1_MODULE_LOCAL_TYPE_SCOPE = (1 << 6),
 	SCHEMA_CF1_GLOBAL_TYPE_SCOPE = (1 << 7),
 	SCHEMA_CF1_CONSTRUCT_ALLOWED = (1 << 8),
 	SCHEMA_CF1_CONSTRUCT_DISALLOWED = (1 << 9),
-
 	SCHEMA_CF1_INFO_TAG_MNetworkAssumeNotNetworkable = (1 << 10),
 	SCHEMA_CF1_INFO_TAG_MNetworkNoBase = (1 << 11),
 	SCHEMA_CF1_INFO_TAG_MIgnoreTypeScopeMetaChecks = (1 << 12),
@@ -54,14 +50,6 @@ enum SchemaClassFlags1_t : uint32
 	SCHEMA_CF1_INFO_TAG_MNonConstructibleClassBase = (1 << 16),
 	SCHEMA_CF1_INFO_TAG_MConstructibleClassBase = (1 << 17),
 	SCHEMA_CF1_INFO_TAG_MHasKV3TransferPolymorphicClassname = (1 << 18),
-#else
-	SCHEMA_CF1_HAS_NOSCHEMA_MEMBERS = (1 << 4),
-
-	SCHEMA_CF1_IS_PARENT_CLASSES_PARSED = (1 << 5),
-	SCHEMA_CF1_IS_LOCAL_TYPE_SCOPE = (1 << 6),
-	SCHEMA_CF1_IS_GLOBAL_TYPE_SCOPE = (1 << 7),
-	SCHEMA_CF1_IS_SCHEMA_VALIDATED = (1 << 10),
-#endif // defined(CS2) || defined(DOTA2) || defined(DEADLOCK)
 };
 
 enum SchemaClassFlags2_t : uint32 {};
@@ -71,6 +59,9 @@ enum SchemaEnumFlags_t : uint8
 	SCHEMA_EF_IS_REGISTERED = (1 << 0),
 	SCHEMA_EF_MODULE_LOCAL_TYPE_SCOPE = (1 << 1),
 	SCHEMA_EF_GLOBAL_TYPE_SCOPE = (1 << 2),
+	SCHEMA_EF_UNK003 = (1 << 3),
+	SCHEMA_EF_UNK004 = (1 << 4), 
+	SCHEMA_EF_UNK005 = (1 << 5)
 };
 
 enum SchemaTypeCategory_t : uint8
@@ -169,12 +160,8 @@ struct SchemaMetaInfoHandle_t
 {
 	SchemaMetaInfoHandle_t() : m_pObj( NULL ) {}
 	SchemaMetaInfoHandle_t( T *obj ) : m_pObj( obj ) {}
-
 	T* Get() const { return m_pObj; }
 	bool operator<( const SchemaMetaInfoHandle_t& rhs ) const { return m_pObj < rhs.m_pObj; }
-	T& operator*() const { return *m_pObj; }
-	T* operator->() const { return m_pObj; }
-	explicit operator bool() const { return static_cast<bool>(m_pObj); }
 
 	T* m_pObj;
 };
@@ -190,33 +177,33 @@ public:
 class CSchemaType
 {
 public:
-	virtual bool IsValid() const { return false; }
-	virtual const char *ToString( CBufferString &buff, bool bDontClearBuff ) const { return ""; }
-	virtual void SpewDescription( LoggingChannelID_t channelID, const char *pszName ) const {}
-	virtual bool GetSizeAndAlignment( int &nSize, uint8 &nAlignment ) const { return false; }
-	virtual bool CanReinterpretAs( const CSchemaType *pType ) const { return false; }
-	virtual SchemaMetaInfoHandle_t<CSchemaType> GetInnerType() const { return nullptr; }
-	virtual SchemaMetaInfoHandle_t<CSchemaType> GetInnermostType() const { return nullptr; }
+	virtual bool IsValid() { return false; }
+	virtual const char *ToString( CBufferString &buff, bool bDontClearBuff ) { return ""; }
+	virtual void SpewDescription( LoggingChannelID_t channelID, const char *pszName ) {}
+	virtual bool GetSizeAndAlignment( int &nSize, uint8 &nAlignment ) { return false; }
+	virtual bool CanReinterpretAs( const CSchemaType *pType ) { return false; }
+	virtual SchemaMetaInfoHandle_t<CSchemaType> GetInnerType() { return nullptr; }
+	virtual SchemaMetaInfoHandle_t<CSchemaType> GetInnermostType() { return nullptr; }
 
 	// Returns true if pType is this object
-	virtual bool IsA( const CSchemaType *pType ) const { return false; }
-	virtual CSchemaType *InternalMatchInnerAs( SchemaTypeCategory_t eTypeCategory, SchemaAtomicCategory_t eAtomicCategory ) const { return nullptr; }
+	virtual bool IsA( const CSchemaType *pType ) { return false; }
+	virtual CSchemaType *InternalMatchInnerAs( SchemaTypeCategory_t eTypeCategory, SchemaAtomicCategory_t eAtomicCategory ) { return nullptr; }
 	
 	// Returns true if this type matches pType type traits
-	virtual bool IsTypeByType( const CSchemaType *pType ) const { return false; }
+	virtual bool IsTypeByType( const CSchemaType *pType ) { return false; }
 	// Returns true if this type name matches szName
-	virtual bool IsTypeByName( const char *szName ) const { return false; }
+	virtual bool IsTypeByName( const char *szName ) { return false; }
 
 	// Returns true if this type is builtin and matches eType
-	virtual bool IsBuiltinType( SchemaBuiltinType_t eType ) const { return false; }
+	virtual bool IsBuiltinType( SchemaBuiltinType_t eType ) { return false; }
 	// Returns true if this type is atomic and matches nAtomicID
-	virtual bool IsAtomicType( int nAtomicID ) const { return false; }
+	virtual bool IsAtomicType( int nAtomicID ) { return false; }
 	// Returns true if this type is declared class and matches szClassName
-	virtual bool IsDeclaredClass( const char *szClassName ) const { return false; }
+	virtual bool IsDeclaredClass( const char *szClassName ) { return false; }
 	// Returns true if this type is declared enum and matches szEnumName
-	virtual bool IsDeclaredEnum( const char *szEnumName ) const { return false; };
+	virtual bool IsDeclaredEnum( const char *szEnumName ) { return false; };
 	
-	virtual bool DependsOnlyOnUnresolvedOrGlobalTypes( ISchemaSystemTypeScope* pTypeScope ) const { return false; }
+	virtual bool DependsOnlyOnUnresolvedOrGlobalTypes( ISchemaSystemTypeScope *pTypeScope ) { return false; };
 	
 	virtual ~CSchemaType() = 0;
 
@@ -331,18 +318,13 @@ struct SchemaMetadataEntryData_t
 struct SchemaClassFieldData_t
 {
 	const char* m_pszName;
-
-	// Before registration: 0xF top nibble with an index into the registered schema types, or null until SCHEMA_CLASS_MANIPULATOR_ACTION_REGISTER fills it in
+	
 	CSchemaType* m_pType;
-
+	
 	int m_nSingleInheritanceOffset;
-
-	int m_nStaticMetadataCount;
+	
+	uint16 m_nStaticMetadataCount;
 	SchemaMetadataEntryData_t* m_pStaticMetadata;
-};
-
-class CSchemaClassField : public SchemaClassFieldData_t
-{
 };
 
 struct SchemaStaticFieldData_t
@@ -353,12 +335,8 @@ struct SchemaStaticFieldData_t
 	
 	void* m_pInstance;
 	
-	int m_nStaticMetadataCount;
+	uint16 m_nStaticMetadataCount;
 	SchemaMetadataEntryData_t* m_pStaticMetadata;
-};
-
-class CSchemaStaticField : public SchemaStaticFieldData_t
-{
 };
 
 struct SchemaBaseClassInfoData_t
@@ -376,19 +354,19 @@ struct SchemaClassInfoData_t
 	const char* m_pszCPPName;
 
 	int m_nSize;
-
+	
 	uint16 m_nFieldCount;
 	uint16 m_nStaticMetadataCount;
-
+	
 	uint8 m_nAlignment;
 	uint8 m_nBaseClassCount;
-
+	
 	uint16 m_nMultipleInheritanceDepth;
 	uint16 m_nSingleInheritanceDepth;
-
+	
 	SchemaClassFieldData_t* m_pFields;
 	SchemaBaseClassInfoData_t* m_pBaseClasses;
-	datamap_t* m_pDataMap;
+	datamap_t* m_pDataDescMap;
 	SchemaMetadataEntryData_t* m_pStaticMetadata;
 	
 	CSchemaSystemTypeScope* m_pTypeScope;
@@ -398,48 +376,10 @@ struct SchemaClassInfoData_t
 	uint32 m_nFlags2;
 	
 	SchemaClassManipulatorFn_t m_pfnManipulator;
-
-	// Fatal for a class that does not allow it
-	void DestructInPlace( void *pObject ) const
-	{
-		if ( ( m_nFlags1 & ( SCHEMA_CF1_IS_ABSTRACT | SCHEMA_CF1_CONSTRUCT_ALLOWED | SCHEMA_CF1_CONSTRUCT_DISALLOWED ) ) != SCHEMA_CF1_CONSTRUCT_ALLOWED )
-			Plat_FatalError( "%s: %s\n", m_pszName, "Class does not allow destruction from its schema binding" );
-
-		if ( !m_pfnManipulator || !m_pfnManipulator( SCHEMA_CLASS_MANIPULATOR_ACTION_DESCTRUCT_IN_PLACE, pObject ) )
-			Plat_FatalError( "%s: %s\n", m_pszName, "Cannot destruct abstract class" );
-	}
-
-	CSchemaClassInfo* GetParent()
-	{
-		if (!m_pBaseClasses)
-			return nullptr;
-
-		return m_pBaseClasses->m_pClass;
-	}
 };
 
 class CSchemaClassInfo : public SchemaClassInfoData_t
 {
-public:
-	SchemaCollectionManipulatorFn_t GetCollectionManipulator( const char *pszField )
-	{
-		for ( CSchemaClassInfo *pClass = this; pClass; pClass = pClass->GetParent() )
-		{
-			for ( int i = 0; i < pClass->m_nFieldCount; ++i )
-			{
-				const auto &field = pClass->m_pFields[ i ];
-				if ( V_strcmp( field.m_pszName, pszField ) )
-					continue;
-
-				if ( !field.m_pType->IsA< CSchemaType_Atomic_CollectionOfT >() )
-					return nullptr;
-
-				return static_cast< CSchemaType_Atomic_CollectionOfT * >( field.m_pType )->m_pfnManipulator;
-			}
-		}
-
-		return nullptr;
-	}
 };
 
 struct SchemaEnumeratorInfoData_t
@@ -448,14 +388,9 @@ struct SchemaEnumeratorInfoData_t
 	
 	int64 m_nValue;
 	
-	int m_nStaticMetadataCount;
+	uint16 m_nStaticMetadataCount;
 	SchemaMetadataEntryData_t* m_pStaticMetadata;
 };
-
-class CSchemaEnumeratorInfo : public SchemaEnumeratorInfoData_t
-{
-};
-
 
 struct SchemaEnumInfoData_t
 {
@@ -467,7 +402,7 @@ struct SchemaEnumInfoData_t
 	uint8 m_nSize;
 	uint8 m_nAlignment;
 	
-	uint8 m_nFlags;
+	uint16 m_nFlags;
 
 	uint16 m_nEnumeratorCount;
 	uint16 m_nStaticMetadataCount;

@@ -12,8 +12,6 @@
 #pragma once
 #endif
 
-#include "tier0/platform.h"
-
 // -------------------------------------------------------
 //
 // commonmacros.h
@@ -63,6 +61,7 @@ inline bool IsPowerOfTwo( T value )
 #if defined(__cplusplus) && \
     !defined(MIDL_PASS) && \
     !defined(RC_INVOKED) && \
+    !defined(_PREFAST_) && \
     (_MSC_FULL_VER >= 13009466) && \
     !defined(SORTPP_PASS)
 
@@ -158,7 +157,6 @@ char (*RtlpNumberOf( UNALIGNED T (&)[N] ))[N];
 template< typename IndexType, typename T, unsigned int N >
 IndexType ClampedArrayIndex( const T (&buffer)[N], IndexType index )
 {
-	NOTE_UNUSED( buffer );
 	return clamp( index, 0, (IndexType)N - 1 );
 }
 
@@ -195,3 +193,4 @@ inline int CalcNewDoublingCount( int old_count, int requested_count, int min_cou
 }
 
 #endif // COMMONMACROS_H
+

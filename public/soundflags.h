@@ -12,7 +12,7 @@
 #pragma once
 #endif
 
-#include "tier0/basetypes.h"
+#include "tier0/platform.h"
 
 
 //-----------------------------------------------------------------------------
@@ -55,7 +55,7 @@ enum
 // Don't change this without consulting Kelly or Wedge (sjb).
 #define ATTN_GUNFIRE	0.27f
 
-schema enum soundlevel_t
+enum soundlevel_t
 {
 	SNDLVL_NONE			= 0,
 

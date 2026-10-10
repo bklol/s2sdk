@@ -16,8 +16,8 @@
 
 #include "tier0/dbg.h"
 #include "tier0/platform.h"
-
 #include "mathlib/mathlib.h"
+
 #include "tier0/memalloc.h"
 #include "tier0/memdbgon.h"
 
@@ -52,7 +52,7 @@ public:
 	// Set the size by which the memory grows
 	void Init( int nGrowSize = 0, int nInitSize = 0 );
 
-	// here to match CUtlMemory, but only used by ResetDbgInfo, so it can just return NULL
+	// here to match CUtlVectorMemory_Growable, but not used, so it can just return NULL
 	T* Base() { return NULL; }
 	const T* Base() const { return NULL; }
 
@@ -67,8 +67,8 @@ public:
 		BlockHeader_t *m_pBlockHeader;
 		intp m_nIndex;
 
-		bool operator==( const Iterator_t& it ) const	{ return m_pBlockHeader == it.m_pBlockHeader && m_nIndex == it.m_nIndex; }
-		bool operator!=( const Iterator_t& it ) const	{ return m_pBlockHeader != it.m_pBlockHeader || m_nIndex != it.m_nIndex; }
+		bool operator==( const Iterator_t it ) const	{ return m_pBlockHeader == it.m_pBlockHeader && m_nIndex == it.m_nIndex; }
+		bool operator!=( const Iterator_t it ) const	{ return m_pBlockHeader != it.m_pBlockHeader || m_nIndex != it.m_nIndex; }
 	};
 	Iterator_t First() const							{ return m_pBlocks ? Iterator_t( m_pBlocks, 0 ) : InvalidIterator(); }
 	Iterator_t Next( const Iterator_t &it ) const
@@ -167,7 +167,7 @@ protected:
 
 template< class T >
 CUtlFixedMemory<T>::CUtlFixedMemory( int nGrowSize, int nInitAllocationCount )
-	: m_pBlocks( 0 ), m_nAllocationCount( 0 ), m_nGrowSize( 0 )
+: m_pBlocks( 0 ), m_nAllocationCount( 0 ), m_nGrowSize( 0 )
 {
 	Init( nGrowSize, nInitAllocationCount );
 }

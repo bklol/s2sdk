@@ -9,9 +9,16 @@
 
 // AMNOTE: Mostly a stub over a real VectorWS,
 // most likely meaning of it is world space vector
-schema class VectorWS : public Vector
+class VectorWS : public Vector
 {
+public:
 	using Vector::Vector;
+};
+
+class QuaternionWS : public Quaternion
+{
+public:
+	using Quaternion::Quaternion;
 };
 
 #endif // VECTORWS_H

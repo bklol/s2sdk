@@ -14,7 +14,6 @@
 #endif
 
 #include "tier0/basetypes.h"
-#include "utlleanvector.h"
 #include "utlfixedmemory.h"
 #include "utlleanvector.h"
 #include "utlblockmemory.h"
@@ -315,7 +314,7 @@ inline bool CUtlLinkedList<T,S,ML,I,M>::IndexInRange( I index ) // Static method
 {
 	// Since S is not necessarily the type returned by M, we need to check that M returns indices
 	// which are representable by S. A common case is 'S === unsigned short', 'I == int', in which
-	// case CUtlMemory will have 'InvalidIndex == (int)-1' (which casts to 65535 in S), and will
+	// case CUtlVectorMemory_Growable will have 'InvalidIndex == (int)-1' (which casts to 65535 in S), and will
 	// happily return elements at index 65535 and above.
 
 	// Do some static checks here:
@@ -868,8 +867,8 @@ public:
 
 	IndexType_t InsertAfter( IndexType_t after )
 	{
-		Node_t *pBefore = ((Node_t *)after)->next;
-		return DoInsertBefore( pBefore, NULL );
+		Node_t *pBefore = ((Node_t *)after)->pNext;
+		return DoInsertBefore( (IndexType_t)pBefore, NULL );
 	}
 
 	IndexType_t InsertBefore( IndexType_t before, T const& src  )
@@ -879,8 +878,8 @@ public:
 
 	IndexType_t InsertAfter( IndexType_t after, T const& src  )
 	{
-		Node_t *pBefore = ((Node_t *)after)->next;
-		return DoInsertBefore( pBefore, &src );
+		Node_t *pBefore = ((Node_t *)after)->pNext;
+		return DoInsertBefore( (IndexType_t)pBefore, &src );
 	}
 
 	void Remove( IndexType_t elem )

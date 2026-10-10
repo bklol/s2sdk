@@ -11,7 +11,8 @@
 #pragma once
 #endif
 
-#include "eiface.h"
+#include "const.h"
+#include "playerslot.h"
 #include "inetchannel.h"
 
 //-----------------------------------------------------------------------------
@@ -22,12 +23,12 @@ class IRecipientFilter
 public:
 	virtual			~IRecipientFilter() {}
 
-	virtual NetChannelBufType_t	GetNetworkBufType() const = 0;
-	virtual bool	IsInitMessage() const = 0;
-	virtual const CPlayerBitVec &GetRecipients() const = 0;
-	virtual CPlayerSlot GetPredictedByPlayerSlot() const = 0;
+	virtual NetChannelBufType_t	GetNetworkBufType( void ) const = 0;
+	virtual bool	IsInitMessage( void ) const = 0;
 
-	int	GetRecipientCount() const { return GetRecipients().PopulationCount(); }
+	virtual const CPlayerBitVec &GetRecipients( void ) const = 0;
+	virtual CPlayerSlot GetPredictedPlayerSlot( void ) const = 0;
 };
 
 #endif // IRECIPIENTFILTER_H
+

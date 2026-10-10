@@ -12,9 +12,12 @@
 #include <limits.h>
 #include <shared_mutex>
 
-#include "basetypes.h"
 #include "tier0/platform.h"
 #include "tier0/dbg.h"
+
+#ifdef PLATFORM_WINDOWS_PC
+#include <intrin.h>
+#endif
 
 #ifdef POSIX
 #include <pthread.h>
@@ -34,24 +37,20 @@
 #endif
 
 
-#if defined( PLATFORM_WINDOWS )
+#if defined( _WIN32 )
 #pragma once
 #pragma warning(push)
 #pragma warning(disable:4251)
 #endif
 
-#ifdef COMPILER_MSVC64
-#include <intrin.h>
-#endif
-
 // #define THREAD_PROFILER 1
 
 #define THREAD_MUTEX_TRACING_SUPPORTED
-#if defined(PLATFORM_WINDOWS) && defined(_DEBUG)
+#if defined(_WIN32) && defined(_DEBUG)
 #define THREAD_MUTEX_TRACING_ENABLED
 #endif
 
-#ifdef PLATFORM_WINDOWS
+#ifdef _WIN32
 typedef void *HANDLE;
 #endif
 
@@ -93,10 +92,10 @@ PLATFORM_INTERFACE bool ReleaseThreadHandle( ThreadHandle_t );
 PLATFORM_OVERLOAD void ThreadAtomicNotifyOne( const uint32 *addr );
 PLATFORM_OVERLOAD void ThreadAtomicNotifyN( const uint32 *addr, uint32 n );
 PLATFORM_OVERLOAD void ThreadAtomicNotifyAll( const uint32 *addr );
-PLATFORM_OVERLOAD void ThreadAtomicWait( volatile uint32 *addr, uint32 ms );
+PLATFORM_OVERLOAD void ThreadAtomicWait( volatile uint32 *addr, uint32 value );
 
 PLATFORM_INTERFACE void ThreadSleep(unsigned duration = 0);
-PLATFORM_INTERFACE void ThreadNanoSleep(unsigned ns);
+PLATFORM_INTERFACE void ThreadNanoSleep( uint32 nNanoseconds );
 PLATFORM_INTERFACE ThreadId_t ThreadGetCurrentId();
 PLATFORM_INTERFACE ThreadHandle_t ThreadGetCurrentHandle();
 PLATFORM_INTERFACE int ThreadGetPriority( ThreadHandle_t hThread = NULL );
@@ -110,24 +109,19 @@ typedef int (*ThreadedLoadLibraryFunc_t)();
 PLATFORM_INTERFACE void SetThreadedLoadLibraryFunc( ThreadedLoadLibraryFunc_t func );
 PLATFORM_INTERFACE ThreadedLoadLibraryFunc_t GetThreadedLoadLibraryFunc();
 
-#if defined( PLATFORM_WINDOWS )
+#if defined( PLATFORM_WINDOWS_PC )
 DLL_IMPORT unsigned long STDCALL GetCurrentThreadId();
 #define ThreadGetCurrentId GetCurrentThreadId
 #endif
 
 inline void ThreadPause()
 {
-#if defined( COMPILER_CLANG ) || defined( COMPILER_GCC )
-	__asm __volatile( "pause" );
-#elif defined ( COMPILER_MSVC64 )
+#if defined( PLATFORM_WINDOWS_PC )
+	// Intrinsic for __asm pause; from <intrin.h>
 	_mm_pause();
-#elif defined( COMPILER_MSVC32 )
-	__asm pause;
-#elif defined( COMPILER_MSVCX360 )
-	YieldProcessor(); 
-	__asm { or r0,r0,r0 } 
-	YieldProcessor(); 
-	__asm { or r1,r1,r1 } 
+#elif defined( POSIX )
+	__asm __volatile( "pause" );
+#elif defined( _X360 )
 #else
 #error "implement me"
 #endif
@@ -135,8 +129,8 @@ inline void ThreadPause()
 
 PLATFORM_INTERFACE bool ThreadJoin( ThreadHandle_t, unsigned timeout = TT_INFINITE );
 
-PLATFORM_INTERFACE void ThreadSetDebugName( ThreadHandle_t hThread, const char *pszName );
-inline		 void ThreadSetDebugName( const char *pszName ) { ThreadSetDebugName( NULL, pszName ); }
+PLATFORM_INTERFACE void ThreadSetDebugNameS2( ThreadHandle_t hThread, const char *pszName );
+inline		 void ThreadSetDebugName( const char *pszName ) { ThreadSetDebugNameS2( NULL, pszName ); }
 
 PLATFORM_INTERFACE void ThreadSetAffinity( ThreadHandle_t hThread, int nAffinityMask );
 
@@ -148,83 +142,65 @@ PLATFORM_INTERFACE void ThreadSetAffinity( ThreadHandle_t hThread, int nAffinity
 //
 //-----------------------------------------------------------------------------
 
-#ifdef PLATFORM_WINDOWS
+#ifdef _WIN32
 #define NOINLINE
 #elif defined(POSIX)
 #define NOINLINE __attribute__ ((noinline))
 #endif
 
-#ifndef _X360
-#define ThreadMemoryBarrier() ((void)0)
+// ThreadMemoryBarrier is a fence/barrier sufficient for most uses. It prevents reads
+// from moving past reads, and writes moving past writes. It is sufficient for
+// read-acquire and write-release barriers. It is not a full barrier and it does
+// not prevent reads from moving past writes -- that would require a full __sync()
+// on PPC and is significantly more expensive.
+#if defined( _X360 ) || defined( _PS3 )
+	#define ThreadMemoryBarrier() __lwsync()
+
+#elif defined(_MSC_VER)
+	// Prevent compiler reordering across this barrier. This is
+	// sufficient for most purposes on x86/x64.
+
+	#if _MSC_VER < 1500
+		// !KLUDGE! For VC 2005
+		// http://connect.microsoft.com/VisualStudio/feedback/details/100051
+		#pragma intrinsic(_ReadWriteBarrier)
+	#endif
+	#define ThreadMemoryBarrier() _ReadWriteBarrier()
+#elif defined(GNUC)
+	// Prevent compiler reordering across this barrier. This is
+	// sufficient for most purposes on x86/x64.
+	// http://preshing.com/20120625/memory-ordering-at-compile-time
+	#define ThreadMemoryBarrier() asm volatile("" ::: "memory")
 #else
-#define ThreadMemoryBarrier() __lwsync()
+	#error Every platform needs to define ThreadMemoryBarrier to at least prevent compiler reordering
 #endif
 
-#if defined( _LINUX ) || defined( _OSX )
-#define USE_INTRINSIC_INTERLOCKED
+#if defined( POSIX )
 // linux implementation
-inline int32 ThreadInterlockedIncrement( int32 volatile *p )
-{
-	Assert( (size_t)p % 4 == 0 );
-	return __sync_fetch_and_add( p, 1 ) + 1;
-}
+inline int32 ThreadInterlockedIncrement( int32 volatile *p )										{ Assert( (size_t)p % 4 == 0 ); return __sync_add_and_fetch( p, 1 ); }
+inline int32 ThreadInterlockedDecrement( int32 volatile *p )										{ Assert( (size_t)p % 4 == 0 ); return __sync_sub_and_fetch( p, 1 ); }
+inline int32 ThreadInterlockedExchange( int32 volatile *p, int32 value )							{ Assert( (size_t)p % 4 == 0 ); return __sync_lock_test_and_set( p, value ); }
+inline int32 ThreadInterlockedExchangeAdd( int32 volatile *p, int32 value )							{ Assert( (size_t)p % 4 == 0 ); return __sync_fetch_and_add( p, value ); }
+inline int32 ThreadInterlockedCompareExchange( int32 volatile *p, int32 value, int32 comperand )	{ Assert( (size_t)p % 4 == 0 ); return __sync_val_compare_and_swap( p, comperand, value ); }
+inline bool ThreadInterlockedAssignIf( int32 volatile *p, int32 value, int32 comperand )			{ Assert( (size_t)p % 4 == 0 ); return __sync_bool_compare_and_swap( p, comperand, value ); }
 
-inline int32 ThreadInterlockedDecrement( int32 volatile *p )
-{
-	Assert( (size_t)p % 4 == 0 ); 
-	return __sync_fetch_and_add( p, -1 ) - 1;
-}
+inline int64 ThreadInterlockedIncrement64( int64 volatile *p )										{ Assert( (size_t)p % 8 == 0 ); return __sync_add_and_fetch( p, 1 ); }
+inline int64 ThreadInterlockedDecrement64( int64 volatile *p )										{ Assert( (size_t)p % 8 == 0 ); return __sync_sub_and_fetch( p, 1 ); }
+inline int64 ThreadInterlockedExchange64( int64 volatile *p, int64 value )							{ Assert( (size_t)p % 8 == 0 ); return __sync_lock_test_and_set( p, value ); }
+inline int64 ThreadInterlockedExchangeAdd64( int64 volatile *p, int64 value )						{ Assert( (size_t)p % 8 == 0 ); return __sync_fetch_and_add( p, value ); }
+inline int64 ThreadInterlockedCompareExchange64( int64 volatile *p, int64 value, int64 comperand )	{ Assert( (size_t)p % 8 == 0 ); return __sync_val_compare_and_swap( p, comperand, value ); }
+inline bool ThreadInterlockedAssignIf64( int64 volatile *p, int64 value, int64 comperand )			{ Assert( (size_t)p % 8 == 0 ); return __sync_bool_compare_and_swap( p, comperand, value ); }
 
-inline int32 ThreadInterlockedExchange( int32 volatile *p, int32 value )
-{
-	Assert( (size_t)p % 4 == 0 );
-	int32 nRet;
-
-	// Note: The LOCK instruction prefix is assumed on the XCHG instruction and GCC gets very confused on the Mac when we use it.
-	__asm __volatile(
-		"xchgl %2,(%1)"
-		: "=r" (nRet)
-		: "r" (p), "0" (value)
-		: "memory");
-	return nRet;
-}
-
-inline int32 ThreadInterlockedExchangeAdd( int32 volatile *p, int32 value )
-{
-	Assert( (size_t)p % 4 == 0 ); 
-	return __sync_fetch_and_add( p, value );
-}
-inline int32 ThreadInterlockedCompareExchange( int32 volatile *p, int32 value, int32 comperand )
-{
-	Assert( (size_t)p % 4 == 0 ); 
-	return __sync_val_compare_and_swap( p, comperand, value );
-}
-
-
-inline bool ThreadInterlockedAssignIf( int32 volatile *p, int32 value, int32 comperand )
-{
-	Assert( (size_t)p % 4 == 0 );
-	return __sync_bool_compare_and_swap( p, comperand, value );
-}
-
-#elif ( defined( COMPILER_MSVC ) && ( _MSC_VER >= 1310 ) )
-// windows 32 implemnetation using compiler intrinsics
-#define USE_INTRINSIC_INTERLOCKED
-
-extern "C"
-{
-	long __cdecl _InterlockedIncrement(volatile long*);
-	long __cdecl _InterlockedDecrement(volatile long*);
-	long __cdecl _InterlockedExchange(volatile long*, long);
-	long __cdecl _InterlockedExchangeAdd(volatile long*, long);
-	long __cdecl _InterlockedCompareExchange(volatile long*, long, long);
-}
-
-#pragma intrinsic( _InterlockedCompareExchange )
+inline void *ThreadInterlockedExchangePointer( void * volatile *p, void *value )							{ Assert( (size_t)p % sizeof(void*) == 0 ); return __sync_lock_test_and_set( p, value ); }
+inline void *ThreadInterlockedCompareExchangePointer( void * volatile *p, void *value, void *comperand )	{ Assert( (size_t)p % sizeof(void*) == 0 ); return __sync_val_compare_and_swap( p, comperand, value ); }
+inline bool ThreadInterlockedAssignPointerIf( void * volatile *p, void *value, void *comperand )			{ Assert( (size_t)p % sizeof(void*) == 0 ); return __sync_bool_compare_and_swap( p, comperand, value ); }
+#elif ( defined( PLATFORM_WINDOWS_PC ) && ( _MSC_VER >= 1310 ) )
+// windows implemnetation using compiler intrinsics
+#pragma intrinsic( _InterlockedIncrement )
 #pragma intrinsic( _InterlockedDecrement )
 #pragma intrinsic( _InterlockedExchange )
 #pragma intrinsic( _InterlockedExchangeAdd ) 
-#pragma intrinsic( _InterlockedIncrement )
+#pragma intrinsic( _InterlockedCompareExchange )
 
 inline int32 ThreadInterlockedIncrement( int32 volatile *p )										{ Assert( (size_t)p % 4 == 0 ); return _InterlockedIncrement( (volatile long*)p ); }
 inline int32 ThreadInterlockedDecrement( int32 volatile *p )										{ Assert( (size_t)p % 4 == 0 ); return _InterlockedDecrement( (volatile long*)p ); }
@@ -232,43 +208,61 @@ inline int32 ThreadInterlockedExchange( int32 volatile *p, int32 value )							{
 inline int32 ThreadInterlockedExchangeAdd( int32 volatile *p, int32 value )							{ Assert( (size_t)p % 4 == 0 ); return _InterlockedExchangeAdd( (volatile long*)p, value ); }
 inline int32 ThreadInterlockedCompareExchange( int32 volatile *p, int32 value, int32 comperand )	{ Assert( (size_t)p % 4 == 0 ); return _InterlockedCompareExchange( (volatile long*)p, value, comperand ); }
 inline bool ThreadInterlockedAssignIf( int32 volatile *p, int32 value, int32 comperand )			{ Assert( (size_t)p % 4 == 0 ); return ( _InterlockedCompareExchange( (volatile long*)p, value, comperand ) == comperand ); }
+
+#if defined( PLATFORM_64BITS )
+#pragma intrinsic( _InterlockedIncrement64 )
+#pragma intrinsic( _InterlockedDecrement64 )
+#pragma intrinsic( _InterlockedExchange64 )
+#pragma intrinsic( _InterlockedExchangeAdd64 ) 
+#pragma intrinsic( _InterlockedCompareExchange64 )
+
+inline int64 ThreadInterlockedIncrement64( int64 volatile *p )										{ Assert( (size_t)p % 8 == 0 ); return _InterlockedIncrement64( (volatile __int64*)p ); }
+inline int64 ThreadInterlockedDecrement64( int64 volatile *p )										{ Assert( (size_t)p % 8 == 0 ); return _InterlockedDecrement64( (volatile __int64*)p ); }
+inline int64 ThreadInterlockedExchange64( int64 volatile *p, int64 value )							{ Assert( (size_t)p % 8 == 0 ); return _InterlockedExchange64( (volatile __int64*)p, value ); }
+inline int64 ThreadInterlockedExchangeAdd64( int64 volatile *p, int64 value )						{ Assert( (size_t)p % 8 == 0 ); return _InterlockedExchangeAdd64( (volatile __int64*)p, value ); }
+inline int64 ThreadInterlockedCompareExchange64( int64 volatile *p, int64 value, int64 comperand )	{ Assert( (size_t)p % 8 == 0 ); return _InterlockedCompareExchange64( (volatile __int64*)p, value, comperand ); }
+inline bool ThreadInterlockedAssignIf64( int64 volatile *p, int64 value, int64 comperand )			{ Assert( (size_t)p % 8 == 0 ); return ( _InterlockedCompareExchange64( (volatile __int64*)p, value, comperand ) == comperand ); }
 #else
-// non 32-bit windows and 360 implementation
+PLATFORM_INTERFACE int64 ThreadInterlockedIncrement64( int64 volatile * ) NOINLINE;
+PLATFORM_INTERFACE int64 ThreadInterlockedDecrement64( int64 volatile * ) NOINLINE;
+PLATFORM_INTERFACE int64 ThreadInterlockedExchange64( int64 volatile *, int64 value ) NOINLINE;
+PLATFORM_INTERFACE int64 ThreadInterlockedExchangeAdd64( int64 volatile *, int64 value ) NOINLINE;
+PLATFORM_INTERFACE int64 ThreadInterlockedCompareExchange64( int64 volatile *, int64 value, int64 comperand ) NOINLINE;
+PLATFORM_INTERFACE bool ThreadInterlockedAssignIf64(volatile int64 *pDest, int64 value, int64 comperand ) NOINLINE;
+#endif
+
+#pragma intrinsic( _InterlockedExchangePointer )
+#pragma intrinsic( _InterlockedCompareExchangePointer )
+
+inline void *ThreadInterlockedExchangePointer( void * volatile *p, void *value )							{ Assert( (size_t)p % sizeof(void*) == 0 ); return _InterlockedExchangePointer( p, value );  }
+inline void *ThreadInterlockedCompareExchangePointer( void * volatile *p, void *value, void *comperand )	{ Assert( (size_t)p % sizeof(void*) == 0 ); return _InterlockedCompareExchangePointer( p, value, comperand ); }
+inline bool ThreadInterlockedAssignPointerIf( void * volatile *p, void *value, void *comperand )			{ Assert( (size_t)p % sizeof(void*) == 0 ); return ( _InterlockedCompareExchangePointer( p, value, comperand ) == comperand ); }
+#else
+// 360 implementation
 PLATFORM_INTERFACE int32 ThreadInterlockedIncrement( int32 volatile * ) NOINLINE;
 PLATFORM_INTERFACE int32 ThreadInterlockedDecrement( int32 volatile * ) NOINLINE;
 PLATFORM_INTERFACE int32 ThreadInterlockedExchange( int32 volatile *, int32 value ) NOINLINE;
 PLATFORM_INTERFACE int32 ThreadInterlockedExchangeAdd( int32 volatile *, int32 value ) NOINLINE;
 PLATFORM_INTERFACE int32 ThreadInterlockedCompareExchange( int32 volatile *, int32 value, int32 comperand ) NOINLINE;
 PLATFORM_INTERFACE bool ThreadInterlockedAssignIf( int32 volatile *, int32 value, int32 comperand ) NOINLINE;
-#endif
 
+PLATFORM_INTERFACE int64 ThreadInterlockedIncrement64( int64 volatile * ) NOINLINE;
+PLATFORM_INTERFACE int64 ThreadInterlockedDecrement64( int64 volatile * ) NOINLINE;
+PLATFORM_INTERFACE int64 ThreadInterlockedExchange64( int64 volatile *, int64 value ) NOINLINE;
+PLATFORM_INTERFACE int64 ThreadInterlockedExchangeAdd64( int64 volatile *, int64 value ) NOINLINE;
+PLATFORM_INTERFACE int64 ThreadInterlockedCompareExchange64( int64 volatile *, int64 value, int64 comperand ) NOINLINE;
+PLATFORM_INTERFACE bool ThreadInterlockedAssignIf64(volatile int64 *pDest, int64 value, int64 comperand ) NOINLINE;
 
-#if defined( USE_INTRINSIC_INTERLOCKED ) && !defined( PLATFORM_64BITS )
-#define TIPTR()
-inline void *ThreadInterlockedExchangePointer( void * volatile *p, void *value )							{ return (void *)( ( intp )ThreadInterlockedExchange( reinterpret_cast<intp volatile *>(p), reinterpret_cast<intp>(value) ) ); }
-inline void *ThreadInterlockedCompareExchangePointer( void * volatile *p, void *value, void *comperand )	{ return (void *)( ( intp )ThreadInterlockedCompareExchange( reinterpret_cast<intp volatile *>(p), reinterpret_cast<intp>(value), reinterpret_cast<intp>(comperand) ) ); }
-inline bool ThreadInterlockedAssignPointerIf( void * volatile *p, void *value, void *comperand )			{ return ( ThreadInterlockedCompareExchange( reinterpret_cast<intp volatile *>(p), reinterpret_cast<intp>(value), reinterpret_cast<intp>(comperand) ) == reinterpret_cast<intp>(comperand) ); }
-#else
 PLATFORM_INTERFACE void *ThreadInterlockedExchangePointer( void * volatile *, void *value ) NOINLINE;
 PLATFORM_INTERFACE void *ThreadInterlockedCompareExchangePointer( void * volatile *, void *value, void *comperand ) NOINLINE;
 PLATFORM_INTERFACE bool ThreadInterlockedAssignPointerIf( void * volatile *, void *value, void *comperand ) NOINLINE;
 #endif
-
 
 inline unsigned ThreadInterlockedExchangeSubtract( int32 volatile *p, int32 value )	{ return ThreadInterlockedExchangeAdd( (int32 volatile *)p, -value ); }
 
 inline void const *ThreadInterlockedExchangePointerToConst( void const * volatile *p, void const *value )							{ return ThreadInterlockedExchangePointer( const_cast < void * volatile * > ( p ), const_cast < void * > ( value ) );  }
 inline void const *ThreadInterlockedCompareExchangePointerToConst( void const * volatile *p, void const *value, void const *comperand )	{ return ThreadInterlockedCompareExchangePointer( const_cast < void * volatile * > ( p ), const_cast < void * > ( value ), const_cast < void * > ( comperand ) ); }
 inline bool ThreadInterlockedAssignPointerToConstIf( void const * volatile *p, void const *value, void const *comperand )			{ return ThreadInterlockedAssignPointerIf( const_cast < void * volatile * > ( p ), const_cast < void * > ( value ), const_cast < void * > ( comperand ) ); }
-
-
-PLATFORM_INTERFACE int64 ThreadInterlockedCompareExchange64( int64 volatile *, int64 value, int64 comperand ) NOINLINE;
-PLATFORM_INTERFACE bool ThreadInterlockedAssignIf64( volatile int64 *pDest, int64 value, int64 comperand ) NOINLINE;
-
-PLATFORM_INTERFACE int64 ThreadInterlockedExchange64( int64 volatile *, int64 value ) NOINLINE;
-PLATFORM_INTERFACE int64 ThreadInterlockedIncrement64( int64 volatile * ) NOINLINE;
-PLATFORM_INTERFACE int64 ThreadInterlockedDecrement64( int64 volatile * ) NOINLINE;
-PLATFORM_INTERFACE int64 ThreadInterlockedExchangeAdd64( int64 volatile *, int64 value ) NOINLINE;
 
 inline unsigned ThreadInterlockedExchangeSubtract( uint32 volatile *p, uint32 value )					{ return ThreadInterlockedExchangeAdd( (int32 volatile *)p, value ); }
 inline unsigned ThreadInterlockedIncrement( uint32 volatile *p )										{ return ThreadInterlockedIncrement( (int32 volatile *)p ); }
@@ -286,8 +280,9 @@ inline bool ThreadInterlockedAssignIf( uint32 volatile *p, uint32 value, uint32 
 //inline int ThreadInterlockedCompareExchange( int volatile *p, int value, int comperand )	{ return ThreadInterlockedCompareExchange( (int32 volatile *)p, value, comperand ); }
 //inline bool ThreadInterlockedAssignIf( int volatile *p, int value, int comperand )	{ return ThreadInterlockedAssignIf( (int32 volatile *)p, value, comperand ); }
 
+
 #if defined( PLATFORM_64BITS )
-#if defined (PLATFORM_WINDOWS) 
+#if defined (_WIN32) 
 typedef __m128i int128;
 inline int128 int128_zero()	{ return _mm_setzero_si128(); }
 
@@ -323,7 +318,7 @@ inline bool ThreadInterlockedAssignIf128( volatile int128 *pDest, const int128 &
 //-----------------------------------------------------------------------------
 // Access to VTune thread profiling
 //-----------------------------------------------------------------------------
-#if defined(PLATFORM_WINDOWS) && defined(THREAD_PROFILER)
+#if defined(_WIN32) && defined(THREAD_PROFILER)
 PLATFORM_INTERFACE void ThreadNotifySyncPrepare(void *p);
 PLATFORM_INTERFACE void ThreadNotifySyncCancel(void *p);
 PLATFORM_INTERFACE void ThreadNotifySyncAcquired(void *p);
@@ -352,7 +347,7 @@ PLATFORM_INTERFACE void ThreadNotifySyncReleasing(void *p);
 #define GETLOCAL( x ) ( x )
 #endif
 
-#if defined( PLATFORM_WINDOWS ) || defined( OSX )
+#if defined( _WIN32 ) || defined( OSX )
 #ifndef __AFXTLS_H__ // not compatible with some Windows headers
 
 #define CTHREADLOCALINT GenericThreadLocals::CThreadLocalInt<int>
@@ -514,7 +509,7 @@ __declspec( dllimport ) GenericThreadLocals::CThreadLocalInt<int> g_nThreadID;
 #endif // _OSX
 
 #endif /// afx32
-#endif //_PLATFORM_WINDOWS
+#endif //__win32
 
 #endif // NO_THREAD_LOCAL
 
@@ -590,7 +585,17 @@ template <typename T>
 class CInterlockedPtr
 {
 public:
-	CInterlockedPtr() : m_value( 0 ) 				{}
+	CInterlockedPtr() : m_value( 0 ) 				
+	{ 
+#ifdef PLATFORM_64BITS 
+		COMPILE_TIME_ASSERT( sizeof(T *) == sizeof(int64) );
+#define THREADINTERLOCKEDEXCHANGEADD( _dest, _value ) 	ThreadInterlockedExchangeAdd64( (volatile int64 *)_dest, _value )
+#else  // PLATFORM_64BITS
+		COMPILE_TIME_ASSERT( sizeof(T *) == sizeof(int32) );
+#define THREADINTERLOCKEDEXCHANGEADD( _dest, _value )	ThreadInterlockedExchangeAdd( (volatile int32 *)_dest, _value )
+#endif  // PLATFORM_64BITS
+	}
+
 	CInterlockedPtr( T *value ) : m_value( value ) 	{}
 
 	operator T *() const			{ return m_value; }
@@ -599,39 +604,21 @@ public:
 	bool operator==( T *rhs ) const	{ return ( m_value == rhs ); }
 	bool operator!=( T *rhs ) const	{ return ( m_value != rhs ); }
 
-#ifdef X64BITS
-	T* operator++() { return ((T*)ThreadInterlockedExchangeAdd64((int64*)&m_value, sizeof(T))) + 1; }
-	T* operator++(int) { return (T*)ThreadInterlockedExchangeAdd64((int64*)&m_value, sizeof(T)); }
+	T *operator++()					{ return ((T *)THREADINTERLOCKEDEXCHANGEADD( &m_value, sizeof(T) )) + 1; }
+	T *operator++(int)				{ return (T *)THREADINTERLOCKEDEXCHANGEADD( &m_value, sizeof(T) ); }
 
-	T* operator--() { return ((T*)ThreadInterlockedExchangeAdd64((int64*)&m_value, -sizeof(T))) - 1; }
-	T* operator--(int) { return (T*)ThreadInterlockedExchangeAdd64((int64*)&m_value, -sizeof(T)); }
-
-	bool AssignIf(T* conditionValue, T* newValue) { return ThreadInterlockedAssignPointerToConstIf((void const**)&m_value, (void const*)newValue, (void const*)conditionValue); }
-
-	T* operator=(T* newValue) { ThreadInterlockedExchangePointerToConst((void const**)&m_value, (void const*)newValue); return newValue; }
-
-	void operator+=(int add) { ThreadInterlockedExchangeAdd64((int64*)&m_value, add * sizeof(T)); }
-	void operator-=(int subtract) { operator+=(-subtract); }
-
-	// Atomic add is like += except it returns the previous value as its return value
-	T* AtomicAdd(int add) { return (T*)ThreadInterlockedExchangeAdd64((int64*)&m_value, add * sizeof(T)); }
-#else
-	T *operator++()					{ return ((T *)ThreadInterlockedExchangeAdd( (int32 *)&m_value, sizeof(T) )) + 1; }
-	T *operator++(int)				{ return (T *)ThreadInterlockedExchangeAdd( (int32 *)&m_value, sizeof(T) ); }
-
-	T *operator--()					{ return ((T *)ThreadInterlockedExchangeAdd( (int32 *)&m_value, -sizeof(T) )) - 1; }
-	T *operator--(int)				{ return (T *)ThreadInterlockedExchangeAdd( (int32 *)&m_value, -sizeof(T) ); }
+	T *operator--()					{ return ((T *)THREADINTERLOCKEDEXCHANGEADD( &m_value, -sizeof(T) )) - 1; }
+	T *operator--(int)				{ return (T *)THREADINTERLOCKEDEXCHANGEADD( &m_value, -sizeof(T) ); }
 
 	bool AssignIf( T *conditionValue, T *newValue )	{ return ThreadInterlockedAssignPointerToConstIf( (void const **) &m_value, (void const *) newValue, (void const *) conditionValue ); }
 
 	T *operator=( T *newValue )		{ ThreadInterlockedExchangePointerToConst( (void const **) &m_value, (void const *) newValue ); return newValue; }
 
-	void operator+=( int add )		{ ThreadInterlockedExchangeAdd( (int32 *)&m_value, add * sizeof(T) ); }
+	void operator+=( int add )		{ THREADINTERLOCKEDEXCHANGEADD( &m_value, add * sizeof(T) ); }
 	void operator-=( int subtract )	{ operator+=( -subtract ); }
 
 	// Atomic add is like += except it returns the previous value as its return value
-	T *AtomicAdd( int add ) { return ( T * ) ThreadInterlockedExchangeAdd( (int32 *)&m_value, add * sizeof(T) ); }
-#endif
+	T *AtomicAdd( int add ) { return ( T * ) THREADINTERLOCKEDEXCHANGEADD( &m_value, add * sizeof(T) ); }
 
 	T *operator+( int rhs ) const		{ return m_value + rhs; }
 	T *operator-( int rhs ) const		{ return m_value - rhs; }
@@ -642,6 +629,8 @@ public:
 
 private:
 	T * volatile m_value;
+
+#undef THREADINTERLOCKEDEXCHANGEADD
 };
 
 
@@ -726,15 +715,17 @@ template <class BaseClass, bool *pCondition>
 class CThreadConditionalMutex : public BaseClass
 {
 public:
-	void Lock()				{ if ( *pCondition ) BaseClass::Lock(); }
-	void Lock() const 		{ if ( *pCondition ) BaseClass::Lock(); }
-	void Unlock()			{ if ( *pCondition ) BaseClass::Unlock(); }
-	void Unlock() const		{ if ( *pCondition ) BaseClass::Unlock(); }
+	CThreadConditionalMutex( const char* pDebugName = NULL ) : BaseClass( pDebugName ) {}
 
-	bool TryLock()			{ if ( *pCondition ) return BaseClass::TryLock(); else return true; }
-	bool TryLock() const 	{ if ( *pCondition ) return BaseClass::TryLock(); else return true; }
-	bool AssertOwnedByCurrentThread() { if ( *pCondition ) return BaseClass::AssertOwnedByCurrentThread(); else return true; }
-	void SetTrace( bool b ) { if ( *pCondition ) BaseClass::SetTrace( b ); }
+	void Lock( const char *pFileName = NULL, int nLine = -1 )			{ if ( *pCondition ) BaseClass::Lock( pFileName, nLine ); }
+	void Lock( const char *pFileName = NULL, int nLine = -1 ) const		{ if ( *pCondition ) BaseClass::Lock( pFileName, nLine ); }
+	void Unlock( const char *pFileName = NULL, int nLine = -1 )			{ if ( *pCondition ) BaseClass::Unlock( pFileName, nLine ); }
+	void Unlock( const char *pFileName = NULL, int nLine = -1 ) const	{ if ( *pCondition ) BaseClass::Unlock( pFileName, nLine ); }
+
+	bool TryLock( const char *pFileName = NULL, int nLine = -1 )		{ if ( *pCondition ) return BaseClass::TryLock( pFileName, nLine ); else return true; }
+	bool TryLock( const char *pFileName = NULL, int nLine = -1 ) const 	{ if ( *pCondition ) return BaseClass::TryLock( pFileName, nLine ); else return true; }
+	bool AssertOwnedByCurrentThread()									{ if ( *pCondition ) return BaseClass::AssertOwnedByCurrentThread(); else return true; }
+	void SetTrace( bool b )												{ if ( *pCondition ) BaseClass::SetTrace( b ); }
 };
 
 //-----------------------------------------------------------------------------
@@ -745,10 +736,12 @@ template <class BaseClass>
 class CThreadTerminalMutex : public BaseClass
 {
 public:
-	bool TryLock()			{ if ( !BaseClass::TryLock() ) { DebuggerBreak(); return false; } return true; }
-	bool TryLock() const 	{ if ( !BaseClass::TryLock() ) { DebuggerBreak(); return false; } return true; }
-	void Lock()				{ if ( !TryLock() ) BaseClass::Lock(); }
-	void Lock() const 		{ if ( !TryLock() ) BaseClass::Lock(); }
+	CThreadTerminalMutex( const char* pDebugName = NULL ) : BaseClass( pDebugName ) {}
+
+	bool TryLock( const char *pFileName = NULL, int nLine = -1 )		{ if ( !BaseClass::TryLock( pFileName, nLine ) ) { DebuggerBreak(); return false; } return true; }
+	bool TryLock( const char *pFileName = NULL, int nLine = -1 ) const 	{ if ( !BaseClass::TryLock( pFileName, nLine ) ) { DebuggerBreak(); return false; } return true; }
+	void Lock( const char *pFileName = NULL, int nLine = -1 )			{ if ( !TryLock( pFileName, nLine ) ) BaseClass::Lock( pFileName, nLine ); }
+	void Lock( const char *pFileName = NULL, int nLine = -1 ) const		{ if ( !TryLock( pFileName, nLine ) ) BaseClass::Lock( pFileName, nLine ); }
 
 };
 
@@ -780,6 +773,7 @@ public:
 		m_lock.Unlock();
 	}
 
+
 private:
 	MUTEX_TYPE &m_lock;
 
@@ -792,10 +786,6 @@ typedef CAutoLockT<CAtomicMutex> CAutoLock;
 
 //---------------------------------------------------------
 
-template <int size>	struct CAutoLockTypeDeducer {};
-template <> struct CAutoLockTypeDeducer<sizeof(CAtomicMutex)> {	typedef CAtomicMutex Type_t; };
-template <> struct CAutoLockTypeDeducer<sizeof(CThreadNullMutex)> {	typedef CThreadNullMutex Type_t; };
-
 #define AUTO_LOCK_( type, mutex ) \
 	CAutoLockT< type > UNIQUE_ID( static_cast<const type &>( mutex ), __FILE__, __LINE__ )
 
@@ -804,22 +794,16 @@ template<typename T> T strip_cv_quals_for_mutex(const T&);
 template<typename T> T strip_cv_quals_for_mutex(volatile T&);
 template<typename T> T strip_cv_quals_for_mutex(const volatile T&);
 
-#if defined( COMPILER_CLANG ) || defined( COMPILER_GCC )
 #define AUTO_LOCK( mutex ) \
-	AUTO_LOCK_( typename CAutoLockTypeDeducer<sizeof(mutex)>::Type_t, mutex )
-#else
-#define AUTO_LOCK( mutex ) \
-	AUTO_LOCK_( CAutoLockTypeDeducer<sizeof(mutex)>::Type_t, mutex )
-#endif
-
+    AUTO_LOCK_( decltype(::strip_cv_quals_for_mutex(mutex)), mutex )
 
 #define AUTO_LOCK_FM( mutex ) \
 	AUTO_LOCK_( CThreadFastMutex, mutex )
 
 #define LOCAL_THREAD_LOCK_( tag ) \
 	; \
-	static CThreadFastMutex autoMutex_## tag; \
-	AUTO_LOCK( autoMutex_## tag )
+	static CThreadFastMutex autoMutex_##tag; \
+	AUTO_LOCK( autoMutex_##tag )
 
 #define LOCAL_THREAD_LOCK() \
 	LOCAL_THREAD_LOCK_(_)
@@ -841,40 +825,19 @@ public:
 	//-----------------------------------------------------
 	// Query if object is useful
 	//-----------------------------------------------------
-#ifdef PLATFORM_POSIX
 	bool operator!() const;
-#endif
 
 	//-----------------------------------------------------
 	// Access handle
 	//-----------------------------------------------------
-#ifdef PLATFORM_WINDOWS
-	bool IsValid() const { return m_hSyncObject != NULL; }
+#ifdef _WIN32
 	operator HANDLE() { return GetHandle(); }
 	const HANDLE GetHandle() const { return m_hSyncObject; }
-
+#endif
 	//-----------------------------------------------------
 	// Wait for a signal from the object
 	//-----------------------------------------------------
 	bool Wait( uint32 dwTimeout = TT_INFINITE );
-#endif // defined(PLATFORM_WINDOWS)
-
-#ifdef PLATFORM_POSIX
-	bool Wait_NoDiagnostics( uint32 dwTimeout );
-	virtual bool WaitImpl( uint32 dwTimeout ) { return false; }
-	bool AcquireSemaphoreInternal( uint value );
-	void CloseSemaphoreInternal( int semid, bool bUnlink, const char* pszName );
-	bool CreateAnonymousSyncObjectInternal( int nInitialValue, bool bManualReset );
-	bool CreateSemaphoreInternal( const char* pszName, int nInitialValue, bool bManualReset, bool* pbAlreadyExists );
-	bool EnsureSemaphoreClearedInternal( int semid );
-	bool EnsureSemaphorePostedInternal( int semid );
-	bool IsSemaphoreOrphanedInternal( int semid, int semnum );
-	bool OpenSemaphoreInternal( const char* pszName, bool bFailIfNotExist );
-	bool ReleaseSemaphoreInternal( int semid, int nReleaseCount );
-	void ResetThreadSyncObjectInternal ( );
-	void SaveNameToFile( const char* pszName );
-	void SignalThreadSyncObjectInternal ( );
-#endif // defined(PLATFORM_POSIX)
 
 	//-----------------------------------------------------
 	// Wait for a signal from any of the specified objects.
@@ -895,17 +858,24 @@ protected:
 	CThreadSyncObject();
 	void AssertUseable();
 
-#ifdef PLATFORM_WINDOWS
+#ifdef PLATFORM_POSIX
+	virtual bool WaitImpl( uint32 dwTimeout );
+#endif
+
+#ifdef _WIN32
 	HANDLE m_hSyncObject;
-	bool m_bInitalized;
+	bool m_bCreatedHandle;
 #elif defined(POSIX)
-	const char *m_pszName; // 8
-	int m_Semaphore; // 16
-	pthread_mutex_t	m_Mutex; // 24
-	pthread_cond_t	m_Condition; // 64
-	bool m_bInitalized; // 112
-	bool m_bManualReset; // 113
-	int64 m_nUnk; // 120
+	char *m_pszSemName;
+	int m_pSemaphore;
+	bool m_bSemOwner;
+	bool m_bSemAutoUndo;
+	pthread_mutex_t	m_Mutex;
+	pthread_cond_t	m_Condition;
+	bool m_bInitalized;
+	bool m_bManualReset;
+	CInterlockedInt m_cSet;
+	int m_nBroadcastCount;
 #else
 #error "Implement me"
 #endif
@@ -914,6 +884,13 @@ private:
 	CThreadSyncObject( const CThreadSyncObject & );
 	CThreadSyncObject &operator=( const CThreadSyncObject & );
 };
+
+
+//-----------------------------------------------------------------------------
+//
+// Wrapper for unnamed event objects
+//
+//-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
 //
@@ -924,34 +901,27 @@ private:
 class PLATFORM_CLASS CThreadSemaphore : public CThreadSyncObject
 {
 public:
-	CThreadSemaphore( int32 initialValue = 0, int32 maxValue = 1, const char *pszName = nullptr, bool bCreate = false );
+	// bAllUsers lets other users open a named semaphore on Linux, and does nothing on Windows
+	CThreadSemaphore(int32 initialValue, int32 maxValue, const char *pszName = NULL, bool bAllUsers = false);
+	~CThreadSemaphore();
 
 	//-----------------------------------------------------
 	// Increases the count of the semaphore object by a specified
 	// amount.  Wait() decreases the count by one on return.
 	//-----------------------------------------------------
-	bool Release( int32 releaseCount = 1, int32 * pPreviousCount = NULL );
+	bool Release(int32 releaseCount = 1, int32 * pPreviousCount = NULL );
 
-#if defined(PLATFORM_POSIX)
-	//-----------------------------------------------------
-	// Wait implementation for a signal from the object
-	//-----------------------------------------------------
-	virtual bool WaitImpl( uint32 dwTimeout ) { return false; }
+#ifdef PLATFORM_POSIX
+protected:
+	bool WaitImpl( uint32 dwTimeout ) override;
 #endif
 
 private:
-	CThreadSemaphore( const CThreadSemaphore & );
-	CThreadSemaphore &operator=( const CThreadSemaphore & );
+	CThreadSemaphore(const CThreadSemaphore &);
+	CThreadSemaphore &operator=(const CThreadSemaphore &);
 };
 
-
-//-----------------------------------------------------------------------------
-//
-// Wrapper for unnamed event objects
-//
-//-----------------------------------------------------------------------------
-
-#if defined( PLATFORM_WINDOWS )
+#if defined( _WIN32 )
 
 //-----------------------------------------------------------------------------
 //
@@ -1015,8 +985,6 @@ public:
 	//-----------------------------------------------------
 	bool Check();
 
-	bool Wait( uint32 dwTimeout = TT_INFINITE );
-
 	// See CThreadSyncObject for definitions of these functions.
 	static uint32 WaitForMultiple( int nObjects, CThreadEvent **ppObjects, bool bWaitAll, uint32 dwTimeout = TT_INFINITE );
 	static uint32 WaitForMultiple( int nObjects, CThreadEvent *ppObjects, bool bWaitAll, uint32 dwTimeout = TT_INFINITE );
@@ -1036,6 +1004,24 @@ public:
 	}
 };
 
+class CThreadMultiWaitEvent
+{
+public:
+	DLL_CLASS_IMPORT CThreadMultiWaitEvent( bool bManualReset = false );
+	DLL_CLASS_IMPORT ~CThreadMultiWaitEvent();
+
+	DLL_CLASS_IMPORT void Set();
+	DLL_CLASS_IMPORT void Reset();
+
+private:
+#ifdef _WIN32
+	HANDLE m_hEvent;
+#else
+	int m_nEventFd;
+#endif
+	int m_nType; // AMNOTE: 2 for auto-reset, 4 for manual-reset
+};
+
 
 //-----------------------------------------------------------------------------
 //
@@ -1048,15 +1034,15 @@ class PLATFORM_CLASS CThreadRWLock
 public:
 	CThreadRWLock();
 
-	void LockForRead( const char *pFileName = NULL, int nLine = -1 );
-	void UnlockRead( const char *pFileName = NULL, int nLine = -1 );
-	void LockForWrite( const char *pFileName = NULL, int nLine = -1 );
-	void UnlockWrite( const char *pFileName = NULL, int nLine = -1 );
+	void LockForRead();
+	void UnlockRead();
+	void LockForWrite();
+	void UnlockWrite();
 
-	void LockForRead( const char *pFileName = NULL, int nLine = -1 ) const { const_cast<CThreadRWLock *>(this)->LockForRead( pFileName, nLine ); }
-	void UnlockRead( const char *pFileName = NULL, int nLine = -1 ) const { const_cast<CThreadRWLock *>(this)->UnlockRead( pFileName, nLine ); }
-	void LockForWrite( const char *pFileName = NULL, int nLine = -1 ) const { const_cast<CThreadRWLock *>(this)->LockForWrite( pFileName, nLine ); }
-	void UnlockWrite( const char *pFileName = NULL, int nLine = -1 ) const { const_cast<CThreadRWLock *>(this)->UnlockWrite( pFileName, nLine ); }
+	void LockForRead() const { const_cast<CThreadRWLock *>(this)->LockForRead(); }
+	void UnlockRead() const { const_cast<CThreadRWLock *>(this)->UnlockRead(); }
+	void LockForWrite() const { const_cast<CThreadRWLock *>(this)->LockForWrite(); }
+	void UnlockWrite() const { const_cast<CThreadRWLock *>(this)->UnlockWrite(); }
 
 private:
 	void WaitForRead();
@@ -1068,6 +1054,58 @@ private:
 	int m_nWriters;
 	int m_nActiveReaders;
 	int m_nPendingReaders;
+};
+
+//-----------------------------------------------------------------------------
+//
+// CThreadRWLock_FastRead
+//
+//-----------------------------------------------------------------------------
+
+enum RWLockTranstionResult_t
+{
+	// Another writer had the lock in between
+	RWLTR_STATE_INVALIDATED = 0,
+	RWLTR_STATE_REMAINED_VALID = 1,
+};
+
+// AMNOTE: Incomplete, tier0 doesn't export LockForRead, UnlockRead and LockForWrite
+class CThreadRWLock_FastRead
+{
+public:
+	enum WriteLockTransition_t
+	{
+		// AMNOTE: Blocks reads with HaveWriteLock_BlockReadsNow( true )
+		TRANSITION_UNK001,
+		// AMNOTE: Blocks reads with HaveWriteLock_BlockReadsNow( false )
+		TRANSITION_UNK002,
+		// AMNOTE: Doesn't block reads
+		TRANSITION_UNK003
+	};
+
+	DLL_CLASS_IMPORT CThreadRWLock_FastRead();
+
+	DLL_CLASS_IMPORT void UnlockWrite( const char *pFileName = NULL, int nLine = -1 );
+	DLL_CLASS_IMPORT RWLockTranstionResult_t UnlockRead_LockForWrite( const char *pFileName, int nLine, WriteLockTransition_t transition );
+	DLL_CLASS_IMPORT RWLockTranstionResult_t UnlockWrite_LockForRead( const char *pFileName = NULL, int nLine = -1 );
+	DLL_CLASS_IMPORT bool TryUnlockRead_LockForWrite( const char *pFileName, int nLine, bool bForce, WriteLockTransition_t transition );
+	DLL_CLASS_IMPORT bool TryUnlockWrite_LockForRead( const char *pFileName = NULL, int nLine = -1 );
+	DLL_CLASS_IMPORT void HaveWriteLock_BlockReadsNow( bool bBlock );
+	DLL_CLASS_IMPORT void HaveWriteLock_UnblockReads();
+
+protected:
+	DLL_CLASS_IMPORT bool EncounteredComplexReadLockOperation( uint32 nInterlock, bool bWait, const char *pFileName, int nLine );
+	DLL_CLASS_IMPORT void UnlockReadAccounting( const char *pFileName, int nLine, uint32 nInterlock );
+
+private:
+	CInterlockedUInt m_Interlock;
+	CInterlockedInt m_ReadlockAccounting;
+	CThreadSemaphore m_WriteLockQueue;
+	CThreadEvent m_WriteLockUnblocked;
+	CThreadEvent m_ReadLockUnblocked;
+
+	ThreadId_t m_WritingThreadID;
+	int m_nWritingThreadLockCount;
 };
 
 //-----------------------------------------------------------------------------
@@ -1097,49 +1135,6 @@ public:
 
 private:
 	std::shared_mutex m_mutex;
-};
-
-class PLATFORM_CLASS CThreadRWLock_FastRead
-{
-public:
-	enum InterlockBits_t : uint32
-	{
-		READ_LOCK_MASK = 0x3FF,
-		WAITING_READ_LOCK_INCREMENT = 0x400,
-		WAITING_READ_LOCK_MASK = 0xFFC00,
-		WRITE_LOCK_INCREMENT = 0x100000,
-		WRITE_LOCK_MASK = 0x7FF00000,
-		READ_LOCK_ACCOUNTING_BIT = 0x80000000
-	};
-
-	enum WriteLockTransition_t
-	{
-		TRANSITION_NONE,
-		TRANSITION_TO_READ,
-		TRANSITION_TO_WRITE
-	};
-
-	CThreadRWLock_FastRead();
-
-	void UnlockWrite(const char* pFileName = nullptr, int nLine = -1);
-	void UnlockRead_LockForWrite(const char* pFileName, int nLine = -1, WriteLockTransition_t transition = TRANSITION_TO_READ);
-	void UnlockWrite_LockForRead(const char* pFileName = nullptr, int nLine = -1);
-	bool TryUnlockRead_LockForWrite(const char* pFileName, int nLine, bool bForce, WriteLockTransition_t transition = TRANSITION_TO_WRITE);
-	bool TryUnlockWrite_LockForRead(const char* pFileName = nullptr, int nLine = -1);
-	void HaveWriteLock_BlockReadsNow(bool bBlock);
-	void HaveWriteLock_UnblockReads();
-	void EncounteredComplexReadLockOperation(uint mode, bool bSomething, const char* pFileName, int nLine = -1);
-	void UnlockReadAccounting(const char* pFileName, int nLine, uint mode);
-
-private:
-	CInterlockedUInt m_Interlock;
-	CInterlockedInt m_ReadlockAccounting;
-	CThreadSemaphore m_Semaphore;
-	CThreadEvent m_WriteLockUnblocked;
-	CThreadEvent m_ReadLockUnblocked;
-
-	ThreadId_t m_WritingThreadID;
-	int m_nWritingThreadLockCount;
 };
 
 //-----------------------------------------------------------------------------
@@ -1178,7 +1173,7 @@ public:
 	// Access the thread handle directly
 	ThreadHandle_t GetThreadHandle();
 
-#ifdef PLATFORM_WINDOWS
+#ifdef _WIN32
 	uint GetThreadId();
 #endif
 
@@ -1241,7 +1236,7 @@ protected:
 	// Called when the thread exits
 	virtual void OnExit();
 
-#ifdef PLATFORM_WINDOWS
+#ifdef _WIN32
 	// Allow for custom start waiting
 	virtual bool WaitForCreateComplete( CThreadEvent *pEvent );
 #endif
@@ -1260,7 +1255,7 @@ private:
 	struct ThreadInit_t
 	{
 		CThread *     pThread;
-#ifdef PLATFORM_WINDOWS
+#ifdef _WIN32
 		CThreadEvent *pInitCompleteEvent;
 #endif
 		bool *        pfInitSuccess;
@@ -1276,9 +1271,9 @@ private:
 	CThread( const CThread & );
 	CThread &operator=( const CThread & );
 
-#ifdef PLATFORM_WINDOWS
+#ifdef _WIN32
 	HANDLE 	m_hThread;
-#elif defined(PLATFORM_POSIX)
+#elif defined(_POSIX)
 	pthread_t m_threadId;
 	CInterlockedInt m_nSuspendCount;
 #endif
@@ -1469,7 +1464,7 @@ inline void CAtomicMutex::Unlock( const char *pFileName, int nLine )
 	if(m_LockCount == 0)
 	{
 		m_CurrentOwnerID = 0;
-		if(m_State.AtomicAdd(~(uint32)State::MASK + 1) != (uint32)State::MASK)
+		if(m_State.AtomicAdd(0u - (uint32)State::MASK) != (uint32)State::MASK)
 			ThreadAtomicNotifyOne( (uint32 *)&m_State );
 	}
 }
@@ -1495,26 +1490,26 @@ inline CThreadRWLock::CThreadRWLock()
 {
 }
 
-inline void CThreadRWLock::LockForRead( const char *pFileName, int nLine )
+inline void CThreadRWLock::LockForRead()
 {
-	m_mutex.Lock( pFileName, nLine );
+	m_mutex.Lock( __FILE__, __LINE__ );
 	if ( m_nWriters)
 	{
 		WaitForRead();
 	}
 	m_nActiveReaders++;
-	m_mutex.Unlock( pFileName, nLine );
+	m_mutex.Unlock( __FILE__, __LINE__ );
 }
 
-inline void CThreadRWLock::UnlockRead( const char *pFileName, int nLine )
+inline void CThreadRWLock::UnlockRead()
 {
-	m_mutex.Lock( pFileName, nLine );
+	m_mutex.Lock( __FILE__, __LINE__ );
 	m_nActiveReaders--;
 	if ( m_nActiveReaders == 0 && m_nWriters != 0 )
 	{
 		m_CanWrite.Set();
 	}
-	m_mutex.Unlock( pFileName, nLine );
+	m_mutex.Unlock( __FILE__, __LINE__ );
 }
 
 // read data from a memory address
@@ -1530,7 +1525,7 @@ template<class T> FORCEINLINE T ReadVolatileMemory( T const *pPtr )
 DLL_GLOBAL_IMPORT __thread int g_nThreadID;
 #endif
 
-#if defined( PLATFORM_WINDOWS )
+#if defined( _WIN32 )
 #pragma warning(pop)
 #endif
 

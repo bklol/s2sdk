@@ -16,7 +16,7 @@
 
 #include <limits.h>
 #include "tier0/threadtools.h"
-#include "tier0/mempool.h"
+#include "tier1/mempool.h"
 #include "generichash.h"
 
 
@@ -55,12 +55,12 @@ public:
 };
 
 template < class KEYTYPE = intp >
-class CUtlTSHashGenericHash
+class CUtlTSHashGenericHashMethod
 {
 public:
 	static int Hash( const KEYTYPE &key, int nBucketMask )
 	{
-		int nHash = HashIntConventional( (intp)key );
+		int nHash = HashIntAlternate( (intp)key );
 		if ( nBucketMask <= USHRT_MAX )
 		{
 			nHash ^= ( nHash >> 16 );
@@ -94,7 +94,7 @@ public:
 	}
 };
 
-template< class T, int BUCKET_COUNT, class KEYTYPE = intp, class HashFuncs = CUtlTSHashGenericHash< KEYTYPE > > 
+template< class T, int BUCKET_COUNT, class KEYTYPE = intp, class HashFuncs = CUtlTSHashGenericHashMethod< KEYTYPE > > 
 class CUtlTSHash
 {
 public:
@@ -209,7 +209,7 @@ CUtlTSHash<T,BUCKET_COUNT,KEYTYPE,HashFuncs>::~CUtlTSHash()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Destroy dsynamically allocated hash data.
+// Purpose: Destroy dynamically allocated hash data.
 //-----------------------------------------------------------------------------
 template<class T, int BUCKET_COUNT, class KEYTYPE, class HashFuncs> 
 inline void CUtlTSHash<T,BUCKET_COUNT,KEYTYPE,HashFuncs>::Purge( void )
@@ -474,7 +474,7 @@ inline void CUtlTSHash<T,BUCKET_COUNT,KEYTYPE,HashFuncs>::FindAndRemove( KEYTYPE
 		Destruct( &pElement->m_Data );
 
 #ifdef _DEBUG
-		memset( pElement, 0xDD, sizeof(HashFixedData_t) );
+		memset( (void *)pElement, 0xDD, sizeof(HashFixedData_t) );
 #endif
 
 		m_EntryMemory.Free( pElement );

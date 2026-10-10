@@ -42,7 +42,6 @@
 #pragma once
 
 #include "utlcommon.h"
-#include "utlleanvector.h"
 #include "utlvectormemory.h"
 #include "mathlib/mathlib.h"
 #include "utllinkedlist.h"
@@ -100,16 +99,14 @@ public:
 	// More efficient than memcpy for the small types that are stored in a hashtable
 	void MoveDataFrom( CUtlHashtableEntry &src )
 	{
-		for ( int i = 0; i < data.Count(); ++i ) { data[i] = src.data[i]; }
+		for ( int i = 0; i < (int)data.Count(); ++i ) { data[i] = src.data[i]; }
 	}
 };
 
-schema template <typename KeyT, typename ValueT = empty_t, typename KeyHashT = DefaultHashFunctor<KeyT>, typename KeyIsEqualT = DefaultEqualFunctor<KeyT>, typename AlternateKeyT = typename ArgumentTypeInfo<KeyT>::Alt_t, typename TableT = CUtlLeanVector<CUtlHashtableEntry<KeyT, ValueT>>>
+template <typename KeyT, typename ValueT = empty_t, typename KeyHashT = DefaultHashFunctor<KeyT>, typename KeyIsEqualT = DefaultEqualFunctor<KeyT>, typename AlternateKeyT = typename ArgumentTypeInfo<KeyT>::Alt_t, typename TableT = CUtlLeanVector<CUtlHashtableEntry<KeyT, ValueT>>>
 class CUtlHashtable
 {
 public:
-	TYPEMETA( MAtomicTransfersAsMap );
-
 	typedef UtlHashHandle_t handle_t;
 
 protected:
@@ -152,7 +149,6 @@ protected:
 	template <typename KeyParamT> handle_t DoInsertNoCheck( KeyParamT k, typename ArgumentTypeInfo<ValueT>::Arg_t v, unsigned int h );
 
 	// Key lookup. Can also return previous-in-chain if result is chained.
-	template <typename KeyParamT> handle_t DoLookupSlow( KeyParamT x, unsigned int h ) const;
 	template <typename KeyParamT> handle_t DoLookup( KeyParamT x, unsigned int h, handle_t *pPreviousInChain ) const;
 
 	// Remove single element by key + hash. Returns the index of the new hole
@@ -219,7 +215,13 @@ public:
 	// Alternate-type key insertion or lookup, always returns a valid handle
 	handle_t Insert( KeyAlt_t k ) { return DoInsert<KeyAlt_t>( k, m_hash(k) ); }
 	handle_t Insert( KeyAlt_t k, ValueArg_t v, bool *pDidInsert = NULL ) { return DoInsert<KeyAlt_t>( k, v, m_hash(k), pDidInsert ); }
-	handle_t Insert( KeyAlt_t k, ValueArg_t v, unsigned int hash, bool *pDidInsert = NULL ) { Assert( hash == m_hash(k) ); return DoInsert<KeyAlt_t>( k, v, hash, pDidInsert ); }
+	// AMNOTE: Assert here triggers a false crash on CUtlSymbolTableLarge when it uses its altkey when adding a string
+	// not sure how else s2 altkey for it is setup, but what we have as an altkey union falls apart here
+	// when it tries to call hash func on it and UtlSymLargeId_t is actually stored there instead of a string
+	// you get a SIGSEGV crash since there's no way to differentiate.
+	// This affects primarily debug builds and has no effect on runtime logic.
+	// So while no other better solutions available this assert is commented out.
+	handle_t Insert( KeyAlt_t k, ValueArg_t v, unsigned int hash, bool *pDidInsert = NULL ) { /*Assert( hash == m_hash(k) );*/ return DoInsert<KeyAlt_t>( k, v, hash, pDidInsert ); }
 
 	// Key removal, returns false if not found
 	bool Remove( KeyArg_t k ) { return DoRemove<KeyArg_t>( k, m_hash(k) ) >= 0; }
@@ -257,8 +259,6 @@ public:
 
 	Element_t const &Get( KeyArg_t k, Element_t const &defaultValue ) const { handle_t h = Find( k ); if ( h != InvalidHandle() ) return Element( h ); return defaultValue; }
 	Element_t const &Get( KeyAlt_t k, Element_t const &defaultValue ) const { handle_t h = Find( k ); if ( h != InvalidHandle() ) return Element( h ); return defaultValue; }
-	Element_t Get( KeyArg_t k, Element_t &&defaultValue ) const { handle_t h = Find( k ); if ( h != InvalidHandle() ) return Element( h ); return defaultValue; }
-	Element_t Get( KeyAlt_t k, Element_t &&defaultValue ) const { handle_t h = Find( k ); if ( h != InvalidHandle() ) return Element( h ); return defaultValue; }
 
 	Element_t const *GetPtr( KeyArg_t k ) const { handle_t h = Find(k); if ( h != InvalidHandle() ) return &Element( h ); return NULL; }
 	Element_t const *GetPtr( KeyAlt_t k ) const { handle_t h = Find(k); if ( h != InvalidHandle() ) return &Element( h ); return NULL; }
@@ -493,38 +493,6 @@ int CUtlHashtable<KeyT, ValueT, KeyHashT, KeyIsEqualT, AltKeyT, TableT>::DoInser
 }
 
 
-template <typename KeyT, typename ValueT, typename KeyHashT, typename KeyIsEqualT, typename AltKeyT, typename TableT>
-template <typename KeyParamT>
-UtlHashHandle_t CUtlHashtable<KeyT, ValueT, KeyHashT, KeyIsEqualT, AltKeyT, TableT>::DoLookupSlow( KeyParamT x, unsigned int h ) const
-{
-	const entry_t* table = m_table.Base();
-
-	// First try a filtered scan using the stored hash bits. This keeps the
-	// fallback cheap when only the root/LAST chain invariants were damaged.
-	for ( int i = 0; i < m_nTableSize; ++i )
-	{
-		if ( !table[i].IsValid() )
-			continue;
-
-		if ( ((table[i].flags_and_hash ^ h) & MASK_HASH) != 0 )
-			continue;
-
-		if ( m_eq( table[i]->m_key, x ) )
-			return (handle_t)i;
-	}
-
-	// If an entry's stored hash bits were corrupted, the filtered pass above
-	// still misses it. Fall back one more time to pure key equality.
-	for ( int i = 0; i < m_nTableSize; ++i )
-	{
-		if ( table[i].IsValid() && m_eq( table[i]->m_key, x ) )
-			return (handle_t)i;
-	}
-
-	return (handle_t)-1;
-}
-
-
 // Key lookup. Can also return previous-in-chain if result is a chained slot.
 template <typename KeyT, typename ValueT, typename KeyHashT, typename KeyIsEqualT, typename AltKeyT, typename TableT>
 template <typename KeyParamT>
@@ -544,16 +512,13 @@ UtlHashHandle_t CUtlHashtable<KeyT, ValueT, KeyHashT, KeyIsEqualT, AltKeyT, Tabl
 	unsigned int idx = chainid;
 	if ( table[idx].IdealIndex( slotmask ) != chainid )
 	{
-		// Nothing in root position should mean no match, but if chain invariants
-		// were damaged we can still recover Find/Insert by scanning valid slots.
-		return pPreviousInChain ? (handle_t)-1 : DoLookupSlow<KeyParamT>( x, h );
+		// Nothing in root position? No match.
+		return (handle_t) -1;
 	}
 
-	// Linear scan until found or end of chain. Bound the walk to one full
-	// table pass so a broken FLAG_LAST invariant can't trap lookup forever.
+	// Linear scan until found or end of chain
 	handle_t lastIdx = (handle_t) -1;
-	unsigned int startIdx = idx;
-	do
+	while (1)
 	{
 		// Only examine this slot if it is valid and belongs to our hash chain
 		if ( table[idx].IdealIndex( slotmask ) == chainid )
@@ -571,18 +536,13 @@ UtlHashHandle_t CUtlHashtable<KeyT, ValueT, KeyHashT, KeyIsEqualT, AltKeyT, Tabl
 			if ( table[idx].flags_and_hash & FLAG_LAST )
 			{
 				// End of chain. No match.
-				return pPreviousInChain ? (handle_t)-1 : DoLookupSlow<KeyParamT>( x, h );
+				return (handle_t) -1;
 			}
 
 			lastIdx = (handle_t) idx;
 		}
 		idx = (idx + 1) & slotmask;
 	}
-	while ( idx != startIdx );
-
-	AssertMsg( false, "CUtlHashtable::DoLookup encountered a chain without FLAG_LAST" );
-
-	return pPreviousInChain ? (handle_t)-1 : DoLookupSlow<KeyParamT>( x, h );
 }
 
 
@@ -806,7 +766,7 @@ void CUtlHashtable<KeyT, ValueT, KeyHashT, KeyIsEqualT, AltKeyT, TableT>::DbgChe
 		}
 		else
 		{
-			Assert( m_table[i].flags_and_hash == FLAG_FREE );
+			Assert( m_table[i].flags_and_hash == (typename entry_t::storage_t)FLAG_FREE );
 		}
 	}
 	Assert( count == Count() && count >= roots && roots == ends );
@@ -888,8 +848,6 @@ public:
 
 	Element_t const &Get( KeyArg_t k, Element_t const &defaultValue ) const { UtlHashHandle_t h = Find( k ); if ( h != InvalidHandle() ) return Element( h ); return defaultValue; }
 	Element_t const &Get( KeyAlt_t k, Element_t const &defaultValue ) const { UtlHashHandle_t h = Find( k ); if ( h != InvalidHandle() ) return Element( h ); return defaultValue; }
-	Element_t Get( KeyArg_t k, Element_t &&defaultValue ) const { UtlHashHandle_t h = Find( k ); if ( h != InvalidHandle() ) return Element( h ); return defaultValue; }
-	Element_t Get( KeyAlt_t k, Element_t &&defaultValue ) const { UtlHashHandle_t h = Find( k ); if ( h != InvalidHandle() ) return Element( h ); return defaultValue; }
 
 	Element_t const *GetPtr( KeyArg_t k ) const { UtlHashHandle_t h = Find(k); if ( h != InvalidHandle() ) return &Element( h ); return NULL; }
 	Element_t const *GetPtr( KeyAlt_t k ) const { UtlHashHandle_t h = Find(k); if ( h != InvalidHandle() ) return &Element( h ); return NULL; }
@@ -917,9 +875,9 @@ public:
 		m_table.Swap(other.m_table);
 		// XXX swapping CUtlLinkedList by block memory swap, ugh
 		char buf[ sizeof(m_data) ];
-		memcpy( buf, &m_data, sizeof(m_data) );
-		memcpy( &m_data, &other.m_data, sizeof(m_data) );
-		memcpy( &other.m_data, buf, sizeof(m_data) );
+		memcpy( buf, (void *)&m_data, sizeof(m_data) );
+		memcpy( (void *)&m_data, (void *)&other.m_data, sizeof(m_data) );
+		memcpy( (void *)&other.m_data, buf, sizeof(m_data) );
 	}
 
 

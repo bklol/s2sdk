@@ -12,7 +12,6 @@
 #pragma once
 #endif
 
-
 // This is a trick to get the DLL extension off the -D option on the command line.
 #define DLLExtTokenPaste(x) #x
 #define DLLExtTokenPaste2(x) DLLExtTokenPaste(x)
@@ -20,64 +19,32 @@
 
 //////////////////////////////////////////////////////////////////////////
 
-#ifndef schema
-#define schema namespace ValveSchemaMarker {}
-#endif
-#ifndef valve_schema
-#define valve_schema schema
-#endif
-#define noschema
-#define schema_pragma( ... )
-#define META( ... )
-#define TYPEMETA( ... )
-#define META_USE_CODEGEN_TAG( ... )
-
+// AlliedModders: We don't need this, and it conflicts with generated proto headers
+// #ifndef schema
+// #define schema namespace ValveSchemaMarker {}
+// #endif
 
 #ifdef COMPILING_SCHEMA
 #define UNSCHEMATIZED_METHOD( x )
-#define INTERNAL_SCHEMA_CLASS_MARKER_DATA `__schema_class_marker_data__`
 #else
 #define UNSCHEMATIZED_METHOD( x ) x
-#define INTERNAL_SCHEMA_CLASS_MARKER_DATA
 #endif
-
-// Data classes (no vtable)
-#define DECLARE_SCHEMA_DATA_CLASS( _className ) \
-	INTERNAL_SCHEMA_CLASS_MARKER_DATA
 
 //////////////////////////////////////////////////////////////////////////
 
 #include "tier0/platform.h"
 #include "commonmacros.h"
 #include "wchartypes.h"
-#ifdef _PS3
-#include <float.h>
-#else
-#include <math.h>
-#endif
 
 #include "tier0/valve_off.h"
 
-// There's a different version of this file in the xbox codeline
-// so the PC version built in the xbox branch includes things like 
-// tickrate changes.
-#include "xbox_codeline_defines.h"
-
-#if defined(_PS3)
-#if defined( __SPU__ )
-#include <spu_intrinsics.h>
-#else
-#include <ppu_intrinsics.h>
-#include <sys/fs.h>
-#endif
-#define PATH_MAX CELL_FS_MAX_FS_PATH_LENGTH
-#define _MAX_PATH PATH_MAX
-#endif
 // stdio.h
 #ifndef NULL
 #define NULL 0
 #endif
 
+
+#ifdef POSIX
 template<class T>
 T abs( const T &a )
 {
@@ -86,6 +53,8 @@ T abs( const T &a )
 	else
 		return a;
 }
+#endif
+
 
 #define ExecuteNTimes( nTimes, x )	\
 	{								\
@@ -126,19 +95,19 @@ T abs( const T &a )
 
 
 
+#if !defined(_X360)
+FORCEINLINE float fpmin( float a, float b )
+{
+	return ( a < b ) ? a : b;
+}
+
+FORCEINLINE float fpmax( float a, float b )
+{
+	return ( a > b ) ? a : b;
+}
+#endif
 
 #ifdef __cplusplus
-
-template< class T, class Y, class X >
-inline T clamp( T const &val, Y const &minVal, X const &maxVal )
-{
-	if( val < minVal )
-		return minVal;
-	else if( val > maxVal )
-		return maxVal;
-	else
-		return val;
-}
 
 // This is the preferred clamp operator. Using the clamp macro can lead to
 // unexpected side-effects or more expensive code. Even the clamp (all
@@ -171,12 +140,15 @@ T Max( T const &val1, T const &val2 )
 	return val1 > val2 ? val1 : val2;
 }
 
-template <typename T>
-void Swap( T &a, T &b )
+template< class T, class Y >
+inline T clamp( T const &val, Y const &minVal, Y const &maxVal )
 {
-	T temp = a;
-	a = b;
-	b = temp;
+	if( val < minVal )
+		return minVal;
+	else if( val > maxVal )
+		return maxVal;
+	else
+		return val;
 }
 
 #else
@@ -193,8 +165,7 @@ void Swap( T &a, T &b )
 //-----------------------------------------------------------------------------
 // fsel
 //-----------------------------------------------------------------------------
-
-#if !defined(_PS3) && !defined(_X360)
+#ifndef _X360
 
 #define fsel(c,x,y) ( (c) >= 0 ? (x) : (y) )
 
@@ -210,33 +181,6 @@ void Swap( T &a, T &b )
 // this is fast if nbit is a compile-time immediate 
 #define ibitsel(a, nbit, x, y) ( ( ((a) & (1 << (nbit))) != 0 ) ? (x) : (y) )
 
-
-FORCEINLINE double fpmin( double a, double b )
-{
-	return a > b  ? b : a;
-}
-
-FORCEINLINE double fpmax( double a, double b )
-{
-	return a >= b ? a : b;
-}
-
-// clamp x to lie inside [a,b]. Assumes b>a
-FORCEINLINE float fclamp( float x, float a, float b )
-{
-	return fpmin( fpmax( x, a ), b );
-}
-// clamp x to lie inside [a,b]. Assumes b>a
-FORCEINLINE double fclamp( double x, double a, double b )
-{
-	return fpmin( fpmax( x, a ), b );
-}
-
-// At some point, we will need a unified API.
-#define imin( x, y ) ( (x) < (y) ? (x) : (y) )
-#define imax( x, y ) ( (x) > (y) ? (x) : (y) )
-#define iclamp clamp
-
 #else
 
 // __fsel(double fComparand, double fValGE, double fLT) == fComparand >= 0 ? fValGE : fLT
@@ -245,61 +189,8 @@ FORCEINLINE double fclamp( double x, double a, double b )
 // opcode, but the __fself version tells the compiler not to do a wasteful unnecessary
 // rounding op after each sel.
 // #define fsel __fsel
-#ifdef _X360
 FORCEINLINE double fsel(double fComparand, double fValGE, double fLT) { return __fsel( fComparand, fValGE, fLT ); }
 FORCEINLINE float fsel(float fComparand, float fValGE, float fLT) { return __fself( fComparand, fValGE, fLT ); }
-#else
-#if defined(__SPU__)
-#define fsel(c,x,y) ( (c) >= 0 ? (x) : (y) )
-#define __fsel fsel
-#define __fsels fsel
-#else
-FORCEINLINE double fsel(double fComparand, double fValGE, double fLT) { return __fsel( fComparand, fValGE, fLT ); }
-FORCEINLINE float fsel(float fComparand, float fValGE, float fLT) { return __fsels( fComparand, fValGE, fLT ); }
-#endif
-#endif
-
-#if !defined(_X360)
-FORCEINLINE float fpmin( float a, float b )
-{
-	return fsel( a-b, b,a);
-}
-FORCEINLINE double fpmin( double a, double b )
-{
-	return fsel( a-b, b,a);
-}
-
-FORCEINLINE float fpmax( float a, float b )
-{
-	return fsel( a-b, a,b);
-}
-FORCEINLINE double fpmax( double a, double b )
-{
-	return fsel( a-b, a,b);
-}
-
-// any mixed calls should promote to double
-FORCEINLINE double fpmax(float a, double b)
-{
-	return fpmax( (double) a, b );
-}
-// any mixed calls should promote to double
-FORCEINLINE double fpmax(double a, float b)
-{
-	return fpmax( (double) a, (double) b );
-}
-#endif
-
-// clamp x to lie inside [a,b]. Assumes b>a
-FORCEINLINE float fclamp( float x, float a, float b )
-{
-	return fpmin( fpmax( x, a ), b );
-}
-// clamp x to lie inside [a,b]. Assumes b>a
-FORCEINLINE double fclamp( double x, double a, double b )
-{
-	return fpmin( fpmax( x, a ), b );
-}
 
 // if a >= 0, return x, else y
 FORCEINLINE int isel( int a, int x, int y )
@@ -329,35 +220,12 @@ FORCEINLINE int ieqsel( int x, int y, int a, int b )
 	return a + ((b - a) & mask);
 };
 
-FORCEINLINE int imin( int x, int y )
-{
-	int nMaxSign = x - y;									// Positive if x greater than y
-	int nMaxMask = nMaxSign >> 31;							// 0 if x greater than y, 0xffffffff if x smaller than y
-	int nMaxSaturated = y + ( nMaxSign & nMaxMask );
-	return nMaxSaturated;
-}
-
-FORCEINLINE int imax( int x, int y )
-{
-	int nMinSign = y - x;									// Positive if x smaller than y
-	int nMinMask = nMinSign >> 31;							// 0 if x smaller than y, 0xffffffff if x greater than y
-	int nMinSaturated = y - ( nMinSign & nMinMask);
-	return nMinSaturated;
-}
-
-FORCEINLINE int iclamp( int x, int min, int max )
-{
-	int nResult = imin( x, max );
-	return imax( nResult, min );
-}
-
 // if the nth bit of a is set (counting with 0 = LSB),
 // return x, else y
 // this is fast if nbit is a compile-time immediate 
 #define ibitsel(a, nbit, x, y) ( (x) + (((y) - (x)) & (((a) & (1 << (nbit))) ? 0 : -1)) )
 
 #endif
-
 
 #if CROSS_PLATFORM_VERSION < 1
 
@@ -372,13 +240,13 @@ typedef uint8 byte;
 typedef uint16 word;
 #endif
 
-#if defined( _WIN32 ) || defined( _PS3 )
-typedef wchar_t ucs2; // under windows & PS3 wchar_t is ucs2
+#ifdef _WIN32
+typedef wchar_t ucs2; // under windows wchar_t is ucs2
 #else
 typedef unsigned short ucs2;
 #endif
 
-schema enum ThreeState_t
+enum ThreeState_t
 {
 	TRS_FALSE,
 	TRS_TRUE,
@@ -411,28 +279,50 @@ inline T AlignValue( T val, uintp alignment )
 
 #ifdef __cplusplus
 
-inline unsigned long& FloatBits( vec_t& f )
+inline uint32& FloatBits( vec_t& f )
 {
-	return *reinterpret_cast<unsigned long*>(&f);
+	return *reinterpret_cast<uint32*>((char*)(&f));
 }
 
-inline unsigned long const& FloatBits( vec_t const& f )
+inline uint32 const FloatBits( const vec_t &f )
 {
-	return *reinterpret_cast<unsigned long const*>(&f);
+	union Convertor_t
+	{
+		vec_t f;
+		uint32 ul;
+	}tmp;
+	tmp.f = f;
+	return tmp.ul;
 }
 
-inline vec_t BitsToFloat( unsigned long i )
+inline vec_t BitsToFloat( uint32 i )
 {
-	return *reinterpret_cast<vec_t*>(&i);
+	union Convertor_t
+	{
+		vec_t f;
+		uint32 ul;
+	}tmp;
+	tmp.ul = i;
+	return tmp.f;
 }
 
 inline bool IsFinite( const vec_t &f )
 {
-#ifdef _GAMECONSOLE
+#if _X360
 	return f == f && fabs(f) <= FLT_MAX;
 #else
 	return ((FloatBits(f) & 0x7F800000) != 0x7F800000);
 #endif
+}
+
+inline uint32 FloatAbsBits( vec_t f )
+{
+	return FloatBits(f) & 0x7FFFFFFF;
+}
+
+inline float FloatMakeNegative( vec_t f )
+{
+	return BitsToFloat( FloatBits(f) | 0x80000000 );
 }
 
 #if defined( WIN32 )
@@ -444,8 +334,6 @@ extern "C"
 {
 #endif
 	double __cdecl fabs(double);
-	//_CRT_JIT_INTRINSIC  _CRTIMP float  __cdecl fabsf( __in float  _X);
-	float __cdecl fabsf( _In_ float );
 #ifdef __cplusplus
 }
 #endif
@@ -456,18 +344,18 @@ extern "C"
 // NOTE:  Is there a perf issue with double<->float conversion?
 inline float FloatMakePositive( vec_t f )
 {
-	return fabsf( f );
+	return (float)fabs( f );
 }
 #else
 inline float FloatMakePositive( vec_t f )
 {
-	return fabsf(f); // was since 2002: BitsToFloat( FloatBits(f) & 0x7FFFFFFF ); fixed in 2010
+	return BitsToFloat( FloatBits(f) & 0x7FFFFFFF );
 }
 #endif
 
 inline float FloatNegate( vec_t f )
 {
-	return -f; //BitsToFloat( FloatBits(f) ^ 0x80000000 );
+	return BitsToFloat( FloatBits(f) ^ 0x80000000 );
 }
 
 
@@ -478,12 +366,6 @@ inline float FloatNegate( vec_t f )
 
 #endif
 
-inline float FloatMakeNegative( vec_t f )
-{
-	return -fabsf( f );// was since 2002: BitsToFloat( FloatBits(f) | 0x80000000 ); fixed in 2010
-}
-
-
 // FIXME: why are these here?  Hardly anyone actually needs them.
 struct color24
 {
@@ -493,7 +375,7 @@ struct color24
 typedef struct color32_s
 {
 	bool operator!=( const struct color32_s &other ) const;
-	byte r, g, b, a;
+	byte r, g, b, a; 
 
 	// assign and copy by using the whole register rather
 	// than byte-by-byte copy. (No, the compiler is not
@@ -510,8 +392,6 @@ typedef struct color32_s
 
 } color32;
 
-inline void EnsureValidValue( color32_s &x ) { x.r = x.g = x.b = x.a = 0; }
-
 inline bool color32::operator!=( const color32 &other ) const
 {
 	return r != other.r || g != other.g || b != other.b || a != other.a;
@@ -522,14 +402,9 @@ struct colorVec
 	unsigned r, g, b, a;
 };
 
-struct colorVec4
-{
-	float r, g, b, a;
-};
-
 
 #ifndef NOTE_UNUSED
-#define NOTE_UNUSED(x)	(void)(x)	// for pesky compiler / lint warnings
+#define NOTE_UNUSED(x)	(x = x)	// for pesky compiler / lint warnings
 #endif
 #ifdef __cplusplus
 
@@ -566,7 +441,7 @@ struct Rect3D_t
 		depth = nDepth;
 	}
 
-	FORCEINLINE Rect3D_t( void ) : Rect3D_t(0, 0, 0, 0, 0, 0)
+	FORCEINLINE Rect3D_t( void )
 	{
 	}
 
@@ -649,49 +524,35 @@ protected:
 };
 
 
+template< class DummyType >
+class CIntHandle64 : public CBaseIntHandle< uint64 >
+{
+public:
+	inline			CIntHandle64() {}
+
+	static inline	CIntHandle64<DummyType> MakeHandle(HANDLE_TYPE val)
+	{
+		return CIntHandle64<DummyType>(val);
+	}
+
+protected:
+	inline			CIntHandle64(HANDLE_TYPE val)
+	{
+		m_Handle = val;
+	}
+};
+
+
 // NOTE: This macro is the same as windows uses; so don't change the guts of it
 #define DECLARE_HANDLE_16BIT(name)	typedef CIntHandle16< struct name##__handle * > name;
 #define DECLARE_HANDLE_32BIT(name)	typedef CIntHandle32< struct name##__handle * > name;
+#define DECLARE_HANDLE_64BIT(name)	typedef CIntHandle64< struct name##__handle * > name;
 
 #define DECLARE_POINTER_HANDLE(name) struct name##__ { int unused; }; typedef struct name##__ *name
 #define FORWARD_DECLARE_HANDLE(name) typedef struct name##__ *name
 
 #define DECLARE_DERIVED_POINTER_HANDLE( _name, _basehandle ) struct _name##__ : public _basehandle##__ {}; typedef struct _name##__ *_name
 #define DECLARE_ALIASED_POINTER_HANDLE( _name, _alias ) typedef struct _alias##__ *name
-
-namespace basetypes
-{
-	template <class T>
-	inline bool IsPowerOf2( T n )
-	{
-		return n > 0 && ( n & ( n - 1 ) ) == 0;
-	}
-
-	template <class T1, class T2>
-	inline T2 ModPowerOf2( T1 a, T2 b )
-	{
-		return T2( a ) & ( b - 1 );
-	}
-
-	template <class T>
-	inline T RoundDownToMultipleOf( T n, T m )
-	{
-		return n - ( IsPowerOf2( m ) ? ModPowerOf2( n, m ) : ( n%m ) );
-	}
-
-	template <class T>
-	inline T RoundUpToMultipleOf( T n, T m )
-	{
-		if ( !n )
-		{
-			return m;
-		}
-		else
-		{
-			return RoundDownToMultipleOf( n + m - 1, m );
-		}
-	}
-}
 
 // @TODO: Find a better home for this
 #if !defined(_STATIC_LINKED) && !defined(PUBLISH_DLL_SUBSYSTEM)
@@ -734,12 +595,10 @@ namespace basetypes
 	inline Type  operator++( Type &a, int ) { Type t = a; ++a; return t; } \
 	inline Type  operator--( Type &a, int ) { Type t = a; --a; return t; }
 
-// Max 2 player splitscreen in portal (don't merge this back), saves a bunch of memory [8/31/2010 tom]
 #define MAX_SPLITSCREEN_CLIENT_BITS 0
 // this should == MAX_JOYSTICKS in InputEnums.h
-#define MAX_SPLITSCREEN_CLIENTS	( 1 << MAX_SPLITSCREEN_CLIENT_BITS ) // 2
+#define MAX_SPLITSCREEN_CLIENTS	( 1 << MAX_SPLITSCREEN_CLIENT_BITS ) // 4
 
 #include "tier0/valve_on.h"
-
 
 #endif // BASETYPES_H

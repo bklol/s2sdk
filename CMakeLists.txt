@@ -1,190 +1,248 @@
-cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16)
+project(s2sdk LANGUAGES C CXX)
 
-if(POLICY CMP0092)
-	cmake_policy(SET CMP0092 NEW) # Don't add -W3 warning level by default.
+# Consumers link s2sdk (or s2sdk::s2sdk): the SDK's include paths, the defines
+# its headers expect, C++20, and tier0, interfaces, mathlib and protobuf.
+#
+#   add_subdirectory(path/to/s2sdk)
+#   target_link_libraries(my_plugin PRIVATE s2sdk::s2sdk)
+#
+# interfaces, mathlib and libprotobuf are the prebuilt ones in lib/ unless
+# S2SDK_BUILD_LIBS is on, which builds them from interfaces/, mathlib/ and
+# thirdparty/protobuf-3.21.8 like the AMBuilders.
+# S2SDK_PROTOC is the protoc for the host, and s2sdk_protobufs() generates and
+# compiles the SDK's protos a target uses.
+#
+# With MSVC the libraries use the static runtime (/MT), so the consumer has to
+# as well: set CMAKE_MSVC_RUNTIME_LIBRARY to MultiThreaded before adding s2sdk.
+#
+# S2SDK_BUILD_TESTS builds tests/ the way CheckScript does, for s2sdk's own CI.
+
+option(S2SDK_BUILD_LIBS "Build interfaces, mathlib and libprotobuf from source instead of linking the prebuilt ones in lib/" OFF)
+option(S2SDK_BUILD_TESTS "Build tests/ like CheckScript (for s2sdk itself)" OFF)
+
+if(S2SDK_BUILD_TESTS AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-project(sourcesdk
-	VERSION 2
-	DESCRIPTION "Source SDK"
-	HOMEPAGE_URL "https://github.com/Wend4r/sourcesdk"
-	LANGUAGES C CXX
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+	message(FATAL_ERROR "s2sdk only supports 64-bit targets")
+endif()
+
+if(MSVC AND NOT CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "^MultiThreaded(\\$<\\$<CONFIG:Debug>:Debug>)?$")
+	message(WARNING "s2sdk's libraries use the static runtime (/MT); set CMAKE_MSVC_RUNTIME_LIBRARY to MultiThreaded")
+endif()
+
+set(S2SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "s2sdk root")
+
+if(CMAKE_HOST_WIN32)
+	set(S2SDK_PROTOC "${S2SDK_DIR}/devtools/bin/protoc.exe" CACHE INTERNAL "protoc")
+else()
+	set(S2SDK_PROTOC "${S2SDK_DIR}/devtools/bin/linux/protoc" CACHE INTERNAL "protoc")
+endif()
+
+if(WIN32)
+	set(S2SDK_LIB_DIR "${S2SDK_DIR}/lib/public/win64")
+	set(S2SDK_TIER0 "${S2SDK_LIB_DIR}/tier0.lib")
+	set(S2SDK_INTERFACES "${S2SDK_LIB_DIR}/interfaces.lib")
+	set(S2SDK_MATHLIB "${S2SDK_LIB_DIR}/mathlib.lib")
+	set(S2SDK_PROTOBUF "${S2SDK_LIB_DIR}/2015/libprotobuf.lib")
+	set(S2SDK_STEAM_API "${S2SDK_LIB_DIR}/steam_api64.lib")
+else()
+	set(S2SDK_LIB_DIR "${S2SDK_DIR}/lib/linux64")
+	set(S2SDK_TIER0 "${S2SDK_LIB_DIR}/libtier0.so")
+	set(S2SDK_INTERFACES "${S2SDK_LIB_DIR}/interfaces.a")
+	set(S2SDK_MATHLIB "${S2SDK_LIB_DIR}/mathlib.a")
+	set(S2SDK_PROTOBUF "${S2SDK_LIB_DIR}/release/libprotobuf.a")
+	set(S2SDK_STEAM_API "${S2SDK_LIB_DIR}/libsteam_api.so")
+endif()
+
+# Includes, defines and language level, without any library
+add_library(s2sdk_headers INTERFACE)
+add_library(s2sdk::headers ALIAS s2sdk_headers)
+
+target_compile_features(s2sdk_headers INTERFACE cxx_std_20)
+
+target_include_directories(s2sdk_headers INTERFACE
+	"${S2SDK_DIR}/thirdparty/protobuf-3.21.8/src"
+	"${S2SDK_DIR}/public"
+	"${S2SDK_DIR}/public/engine"
+	"${S2SDK_DIR}/public/mathlib"
+	"${S2SDK_DIR}/public/tier0"
+	"${S2SDK_DIR}/public/tier1"
+	"${S2SDK_DIR}/public/entity2"
+	"${S2SDK_DIR}/game/shared"
+	"${S2SDK_DIR}/game/server"
+	"${S2SDK_DIR}/common"
 )
 
-string(REGEX REPLACE "^[^-]*-" "" PROJECT_NAME_SUBSTRING "${PROJECT_NAME}")
-string(TOLOWER "${PROJECT_NAME_SUBSTRING}" PROJECT_NAME_LOWER)
-string(TOUPPER "${PROJECT_NAME_SUBSTRING}" PROJECT_NAME_UPPER)
+target_compile_definitions(s2sdk_headers INTERFACE X64BITS PLATFORM_64BITS)
 
-set(PROJECT_OUTPUT_NAME "${PROJECT_NAME_SUBSTRING}")
-
-set(PROJECT_AUTHOR "AlliedModders (Wend4r's fork)")
-set(PROJECT_DESCRIPTION_FULL "Source SDK toolkit")
-string(TIMESTAMP PROJECT_BUILD_DATE "%Y-%m-%d")
-string(TIMESTAMP PROJECT_BUILD_TIME "%H:%M:%S")
-
-set(SOURCESDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(DEVTOOLS_DIR "${SOURCESDK_DIR}/devtools")
-set(DEVTOOLS_BIN_DIR "${DEVTOOLS_DIR}/bin")
-set(THIRDPARTY_DIR "${SOURCESDK_DIR}/thirdparty")
-set(GAME_PROTOBUFS_DIR "${THIRDPARTY_DIR}/game_protobufs")
-set(PROTOBUF_DIR "${THIRDPARTY_DIR}/protobuf")
-
-set(GAME_PROTOBUFS_NAME "Game Protobufs")
-set(PROTOBUF_NAME "Protocol Buffer")
-
-if(NOT EXISTS "${GAME_PROTOBUFS_DIR}")
-	message(FATAL_ERROR "Directory \"${GAME_PROTOBUFS_DIR}\" (${GAME_PROTOBUFS_NAME}) hasn't found. Did you clone recursively?")
+if(MSVC)
+	target_compile_definitions(s2sdk_headers INTERFACE COMPILER_MSVC COMPILER_MSVC64 WIN32 WIN64
+		# The game is built without iterator debugging, which changes the layout of STL
+		# types, like the strings in protobuf messages that plugins share with the game
+		_ITERATOR_DEBUG_LEVEL=0
+	)
+else()
+	target_compile_definitions(s2sdk_headers INTERFACE
+		COMPILER_GCC _LINUX LINUX POSIX GNUC
+		# libprotobuf.a and tier0 use the old std::string ABI
+		_GLIBCXX_USE_CXX11_ABI=0
+		_finite=finite
+		stricmp=strcasecmp _stricmp=strcasecmp
+		strnicmp=strncasecmp _strnicmp=strncasecmp
+		strcmpi=strcasecmp
+		_vsnprintf=vsnprintf
+		_alloca=alloca
+	)
 endif()
 
-if(NOT EXISTS "${PROTOBUF_DIR}")
-	message(FATAL_ERROR "Directory \"${PROTOBUF_DIR}\" (${PROTOBUF_NAME}) hasn't found. Did you clone recursively?")
+# What AMBuildScript compiles the SDK's own code with (the libraries, tests/)
+if(MSVC)
+	set(S2SDK_OWN_DEFINITIONS _WINDOWS WINDOWS _CRT_SECURE_NO_DEPRECATE _CRT_NONSTDC_NO_DEPRECATE)
+	set(S2SDK_OWN_OPTIONS)
+else()
+	set(S2SDK_OWN_DEFINITIONS)
+	set(S2SDK_OWN_OPTIONS
+		-Wall -Werror -Wno-overloaded-virtual -Wno-non-virtual-dtor -Wno-delete-non-virtual-dtor
+		-Wno-invalid-offsetof -Wno-unknown-pragmas -Wno-unused -Wno-narrowing -Wno-register
+		-march=nocona -mmmx -msse -msse2
+	)
 endif()
 
-set(SOURCESDK_GAME_TARGET "cs2" CACHE STRING "Game name. See CMakeGameManifests.json")
-set(SOURCESDK_MODULE_PROJECT_NAME "${CMAKE_PROJECT_NAME}" CACHE STRING "Project name reported by BinaryProperties_GetValue")
-option(SOURCESDK_AM_DEFINES "Compile with AlliedModders definition set" OFF)
-option(SOURCESDK_COMPILE_PROTOBUF "Compile Protocol Buffers" ON)
-option(SOURCESDK_USE_MINIMAL_PROTOS "Use the SDK-required proto list when SOURCESDK_PROTOS is unset" ON)
-option(SOURCESDK_CONFIGURE_EXPORT_MAP "Configure export symbols/map (Unix only)" ON)
-option(SOURCESDK_CREATE_INTEFACE_OVERRIDE "Enable it if you are using your own CreateInteface" OFF)
-option(SOURCESDK_ENABLE_TESTS "Build Source SDK tests" OFF)
-option(SOURCESDK_GENERATE_CLANGD "Generate .clangd with the SDK target flags for its headers" OFF)
-option(SOURCESDK_LINK_TIER0 "Link with tier0" ON)
-option(SOURCESDK_LINK_STEAMWORKS "Link with Steam API" ON)
-option(SOURCESDK_LINK_STRIP_CPP_EXPORTS "Strip C++/STL export funcitons from linked libraries (e.g. tier0 and steam_api)" OFF)
-option(SOURCESDK_LINK_STRIP_SYMBOLS "Strip debug symbols from built targets" OFF)
-option(SOURCESDK_LINK_ENABLE_RPATH "Embed $ORIGIN into ELF RPATH/RUNPATH so binaries load project .so next to the executable" ON)
-option(SOURCESDK_LINK_USE_MOLD "Link with the mold linker (if exists)" OFF)
-option(SOURCESDK_MALLOC_OVERRIDE "Valve memory system" OFF)
-option(SOURCESDK_MSVC_RUNTIME_LIBRARY "MultiThreaded assembly of run-time library by MSVC" ON)
-option(SOURCESDK_RESOURCE_EXPORTS_OVERRIDE "Enable it if you are using your own GetResourceManifestCount and GetResourceManifests" OFF)
-option(SOURCESDK_SCHEMA_EXPORTS_OVERRIDE "Enable it if you are using your own InstallSchemaBindings" OFF)
-option(SOURCESDK_STATIC_LINKED "The SDK objects are linked statically into the game instead of into a shared library" OFF)
-option(SOURCESDK_USE_ABI0 "Enable use of the older C++ ABI, which was the default in GCC versions before GCC 5" ON)
+if(S2SDK_BUILD_LIBS)
+	add_library(s2sdk_interfaces STATIC
+		interfaces/interfaces.cpp
+	)
 
-set(SOURCESDK_COMMON_DIR "${SOURCESDK_DIR}/common")
-set(SOURCESDK_ENTITY2_DIR "${SOURCESDK_DIR}/entity2")
-set(SOURCESDK_INTERFACES_DIR "${SOURCESDK_DIR}/interfaces")
-set(SOURCESDK_KV3LIB_DIR "${SOURCESDK_DIR}/kv3lib")
-set(SOURCESDK_MATHLIB_DIR "${SOURCESDK_DIR}/mathlib")
-set(SOURCESDK_PUBLIC_DIR "${SOURCESDK_DIR}/public")
-set(SOURCESDK_SYMBOLS_DIR "${SOURCESDK_DIR}/sym")
-set(SOURCESDK_NETWORKSYSTEM_DIR "${SOURCESDK_DIR}/networksystem")
-set(SOURCESDK_TIER1_DIR "${SOURCESDK_DIR}/tier1")
+	add_library(s2sdk_mathlib STATIC
+		mathlib/anorms.cpp
+		mathlib/bumpvects.cpp
+		mathlib/color_conversion.cpp
+		mathlib/halton.cpp
+		mathlib/IceKey.cpp
+		mathlib/imagequant.cpp
+		mathlib/lightdesc.cpp
+		mathlib/mathlib_base.cpp
+		mathlib/polyhedron.cpp
+		mathlib/powsse.cpp
+		mathlib/quantize.cpp
+		mathlib/randsse.cpp
+		mathlib/simdvectormatrix.cpp
+		mathlib/sparse_convolution_noise.cpp
+		mathlib/sse.cpp
+		mathlib/sseconst.cpp
+		mathlib/ssenoise.cpp
+		mathlib/vmatrix.cpp
+	)
 
-set(SOURCESDK_NEEDED_PROTOS
-	netmessages
-	network_connection
-	networkbasetypes
-	networksystem_protomessages
-	gameevents
-	usermessages
-	source2_steam_stats
-	valveextensions
-)
-
-include(cmake/platform/shared.cmake)
-
-if(WINDOWS)
-	include(cmake/platform/windows.cmake)
-elseif(LINUX)
-	include(cmake/platform/linux.cmake)
-elseif(MACOS)
-	include(cmake/platform/macos.cmake)
-endif()
-
-if(SOURCESDK_COMPILE_PROTOBUF)
-	include(cmake/protobuf.cmake)
-	include(cmake/protobuf/targets/libprotobuf-lite.cmake)
-	include(cmake/protobuf/targets/libprotobuf.cmake)
-	include(cmake/protobuf/targets/libprotoc.cmake)
-	include(cmake/protobuf/targets/protoc.cmake)
-endif()
-
-include(cmake/sourcesdk.cmake)
-include(cmake/sourcesdk/manifests.cmake)
-include(cmake/sourcesdk/manifests/proto.cmake)
-include(cmake/sourcesdk/proto.cmake)
-include(cmake/sourcesdk/proto/clean_prev.cmake)
-include(cmake/sourcesdk/proto/generate.cmake)
-include(cmake/sourcesdk/targets/game/server.cmake)
-include(cmake/sourcesdk/targets/game/shared.cmake)
-include(cmake/sourcesdk/targets/common.cmake)
-include(cmake/sourcesdk/targets/engine.cmake)
-include(cmake/sourcesdk/targets/entity2.cmake)
-include(cmake/sourcesdk/targets/interfaces.cmake)
-include(cmake/sourcesdk/targets/mathlib.cmake)
-include(cmake/sourcesdk/targets/networksystem.cmake)
-
-if(SOURCESDK_COMPILE_PROTOBUF)
-	include(cmake/sourcesdk/targets/protos.cmake)
-endif()
-
-include(cmake/sourcesdk/targets/public.cmake)
-include(cmake/sourcesdk/targets/steamworks.cmake)
-include(cmake/sourcesdk/targets/tier0.cmake)
-include(cmake/sourcesdk/targets/tier1.cmake)
-include(cmake/sourcesdk/targets/kv3lib.cmake)
-
-set(SOURCESDK_GAME_TARGET_PREV "${SOURCESDK_GAME_TARGET}" CACHE INTERNAL "Previous value of SOURCESDK_GAME_TARGET")
-
-add_library(${PROJECT_NAME} STATIC ${SOURCESDK_SOURCE_FILES})
-add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
-
-set_target_properties(${PROJECT_NAME} PROPERTIES
-	C_STANDARD 17
-	C_STANDARD_REQUIRED ON
-	C_EXTENSIONS OFF
-
-	CXX_STANDARD 17
-	CXX_STANDARD_REQUIRED ON
-	CXX_EXTENSIONS OFF
-)
-
-if(WINDOWS)
-	if(SOURCESDK_MSVC_RUNTIME_LIBRARY)
-		set_target_properties(${PROJECT_NAME} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+	# libprotobuf: the sources its own CMake build compiles, like its AMBuilder
+	set(_protobuf_dir "${S2SDK_DIR}/thirdparty/protobuf-3.21.8")
+	set(_protobuf_sources)
+	foreach(_list libprotobuf-lite libprotobuf)
+		file(READ "${_protobuf_dir}/cmake/${_list}.cmake" _content)
+		string(REPLACE "-" "_" _var "${_list}_files")
+		string(REGEX MATCH "set\\(${_var}[^)]*\\)" _files "${_content}")
+		string(REGEX MATCHALL "\\$\\{protobuf_SOURCE_DIR\\}/[^ \t\r\n)]+\\.cc" _cc "${_files}")
+		string(REPLACE "\${protobuf_SOURCE_DIR}" "${_protobuf_dir}" _cc "${_cc}")
+		list(APPEND _protobuf_sources ${_cc})
+	endforeach()
+	add_library(s2sdk_libprotobuf STATIC ${_protobuf_sources})
+	target_include_directories(s2sdk_libprotobuf PRIVATE "${_protobuf_dir}/src")
+	# Third-party code, so its warnings are left to upstream
+	if(MSVC)
+		target_compile_options(s2sdk_libprotobuf PRIVATE /w /EHsc /utf-8 /bigobj)
+	else()
+		target_compile_options(s2sdk_libprotobuf PRIVATE -w)
 	endif()
-elseif(MACOS)
-	set_target_properties(${PROJECT_NAME} PROPERTIES OSX_ARCHITECTURES "x86_64")
+
+	# The same settings as AMBuildScript
+	foreach(lib s2sdk_interfaces s2sdk_mathlib s2sdk_libprotobuf)
+		target_link_libraries(${lib} PRIVATE s2sdk_headers)
+		target_compile_definitions(${lib} PRIVATE _LIB)
+		set_target_properties(${lib} PROPERTIES
+			POSITION_INDEPENDENT_CODE ON
+			PREFIX ""
+			MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+		)
+		target_compile_definitions(${lib} PRIVATE ${S2SDK_OWN_DEFINITIONS})
+		target_compile_options(${lib} PRIVATE ${S2SDK_OWN_OPTIONS})
+	endforeach()
+
+	set_target_properties(s2sdk_interfaces PROPERTIES OUTPUT_NAME interfaces)
+	set_target_properties(s2sdk_mathlib PROPERTIES OUTPUT_NAME mathlib)
+	set_target_properties(s2sdk_libprotobuf PROPERTIES OUTPUT_NAME libprotobuf)
+	target_include_directories(s2sdk_mathlib PRIVATE "${S2SDK_DIR}/public/mathlib")
+
+	set(S2SDK_INTERFACES s2sdk_interfaces)
+	set(S2SDK_MATHLIB s2sdk_mathlib)
+	set(S2SDK_PROTOBUF s2sdk_libprotobuf)
 endif()
 
-target_compile_options(${PROJECT_NAME} PUBLIC ${PLATFORM_COMPILE_OPTIONS} ${SOURCESDK_COMPILER_OPTIONS})
-target_link_options(${PROJECT_NAME} PUBLIC ${PLATFORM_LINK_OPTIONS} ${SOURCESDK_LINK_OPTIONS})
+add_library(s2sdk INTERFACE)
+add_library(s2sdk::s2sdk ALIAS s2sdk)
 
-target_compile_definitions(${PROJECT_NAME} PUBLIC ${PLATFORM_COMPILE_DEFINITIONS} ${SOURCESDK_COMPILE_DEFINITIONS})
-target_include_directories(${PROJECT_NAME} PUBLIC ${PLATFORM_INCLUDE_DIRS} ${SOURCESDK_INCLUDE_DIRS})
-
-set(SOURCESDK_LINK_LIBRARIES
-	${PLATFORM_LINK_LIBRARIES}
-	${SOURCESDK_LINK_LIBRARIES}
-	${SOURCESDK_COMMON_NAME}
-	${SOURCESDK_ENTITY2_NAME}
-	${SOURCESDK_INTERFACES_NAME}
-	${SOURCESDK_KV3LIB_NAME}
-	${SOURCESDK_MATHLIB_NAME}
-	${SOURCESDK_NETWORKSYSTEM_NAME}
-	${SOURCESDK_PROTOS_NAME}
-	${SOURCESDK_TIER1_NAME}
+target_link_libraries(s2sdk INTERFACE
+	s2sdk_headers
+	${S2SDK_MATHLIB}
+	${S2SDK_INTERFACES}
+	"${S2SDK_TIER0}"
+	"${S2SDK_PROTOBUF}"
 )
 
-if(SOURCESDK_LINK_TIER0)
-	list(APPEND SOURCESDK_LINK_LIBRARIES ${SOURCESDK_TIER0_NAME})
-endif()
+add_library(s2sdk_steam_api INTERFACE)
+add_library(s2sdk::steam_api ALIAS s2sdk_steam_api)
+target_link_libraries(s2sdk_steam_api INTERFACE "${S2SDK_STEAM_API}")
 
-if(SOURCESDK_LINK_STEAMWORKS)
-	list(APPEND SOURCESDK_LINK_LIBRARIES ${SOURCESDK_STEAM_NAME})
-endif()
+# Generates the given protos into a target and compiles them with it, like
+# AMBuild's Protoc tool with the protoc hl2sdk-manifests sets up. The protos are
+# relative to the SDK or absolute, and a proto's imports have to be listed too.
+# Imports are looked up in each proto's folder, then the SDK's include paths.
+# The generated headers' folder is public, for a static library of protobufs.
+#
+#   s2sdk_protobufs(my_plugin common/netmessages.proto common/networkbasetypes.proto)
+function(s2sdk_protobufs target)
+	set(out "${CMAKE_CURRENT_BINARY_DIR}/${target}_protobufs")
+	file(MAKE_DIRECTORY "${out}")
 
-target_link_libraries(${PROJECT_NAME} PUBLIC ${PLATFORM_LINK_LIBRARIES} ${SOURCESDK_LINK_LIBRARIES})
+	set(protos)
+	set(dirs)
+	foreach(proto ${ARGN})
+		if(NOT IS_ABSOLUTE "${proto}")
+			set(proto "${S2SDK_DIR}/${proto}")
+		endif()
+		get_filename_component(dir "${proto}" DIRECTORY)
+		list(APPEND protos "${proto}")
+		list(APPEND dirs "${dir}")
+	endforeach()
+	get_target_property(includes s2sdk_headers INTERFACE_INCLUDE_DIRECTORIES)
+	list(APPEND dirs ${includes})
 
-if(SOURCESDK_COMPILE_PROTOBUF)
-	target_link_libraries(${PROJECT_NAME} PUBLIC ${PROTOBUF_LIBPPROTOBUF_NAME})
-endif()
+	# One protoc run per proto with its own folder first, like the Protoc tool: a
+	# proto in a subfolder of another one's folder would otherwise be seen under
+	# two names when one imports it.
+	set(sources)
+	foreach(proto ${protos})
+		get_filename_component(dir "${proto}" DIRECTORY)
+		get_filename_component(name "${proto}" NAME_WE)
+		set(proto_paths "${dir}" ${dirs})
+		list(REMOVE_DUPLICATES proto_paths)
+		list(TRANSFORM proto_paths PREPEND "--proto_path=")
+		add_custom_command(
+			OUTPUT "${out}/${name}.pb.cc" "${out}/${name}.pb.h"
+			COMMAND "${S2SDK_PROTOC}" ${proto_paths} "--cpp_out=${out}" "${proto}"
+			DEPENDS ${protos}
+			COMMENT "Generating ${name}.pb.cc"
+			VERBATIM
+		)
+		list(APPEND sources "${out}/${name}.pb.cc")
+	endforeach()
 
-include(cmake/sourcesdk/clangd.cmake)
+	target_sources(${target} PRIVATE ${sources})
+	target_include_directories(${target} PUBLIC "${out}")
+endfunction()
 
-if(SOURCESDK_ENABLE_TESTS)
-	enable_testing()
+if(S2SDK_BUILD_TESTS)
 	add_subdirectory(tests)
 endif()

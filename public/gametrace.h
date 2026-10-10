@@ -11,13 +11,13 @@
 #endif
 
 
-#include "cmodel.h"
-#include "color.h"
+#include "ray.h"
+#include "Color.h"
 #include "entity2/entityinstance.h"
 #include "mathlib/transform.h"
-#include "tier0/utlstring.h"
 #include "tier1/generichash.h"
 #include "tier1/utlvector.h"
+#include "tier1/utlstring.h"
 
 class IPhysicsBody;
 class IPhysicsShape;
@@ -82,7 +82,7 @@ enum RnQueryObjectSet
 	RNQUERY_OBJECTS_ALL               = RNQUERY_OBJECTS_STATIC | RNQUERY_OBJECTS_ALL_GAME_ENTITIES,
 };
 
-schema enum HitGroup_t
+enum HitGroup_t
 {
 	HITGROUP_INVALID = -1,
 	HITGROUP_GENERIC = 0,
@@ -118,9 +118,6 @@ public:
 		m_thickness = 0.1f;
 		m_softContactFrequency = 0.0f;
 		m_softContactDampingRatio = 0.0f;
-		m_wheelDrag = 0.0f;
-		m_heatConductivity = 0.0f;
-		m_flashpoint = 0.0f;
 	}
 	
 public:
@@ -130,9 +127,20 @@ public:
 	float m_thickness;
 	float m_softContactFrequency;
 	float m_softContactDampingRatio;
+};
+
+class CPhysSurfacePropertiesVehicle
+{
+public:
+	CPhysSurfacePropertiesVehicle()
+	{
+		m_wheelDrag = 0.0f;
+		m_wheelFrictionScale = 0.0f;
+	}
+
+public:
 	float m_wheelDrag;
-	float m_heatConductivity;
-	float m_flashpoint;
+	float m_wheelFrictionScale;
 };
 
 class CPhysSurfacePropertiesSoundNames
@@ -157,6 +165,7 @@ public:
 	CUtlString m_meleeImpact;
 	CUtlString m_pushOff;
 	CUtlString m_skidStop;
+	CUtlString m_resonant;
 };
 
 class CPhysSurfacePropertiesAudio
@@ -202,6 +211,7 @@ public:
 	bool m_bHidden;
 	CUtlString m_description;
 	CPhysSurfacePropertiesPhysics m_physics;
+	CPhysSurfacePropertiesVehicle m_vehicleParams;
 	CPhysSurfacePropertiesSoundNames m_audioSounds;
 	CPhysSurfacePropertiesAudio m_audioParams;
 };
@@ -213,7 +223,6 @@ public:
 	{
 		m_vMinBounds.Init();
 		m_vMaxBounds.Init();
-		m_flShapeRadius = 0.0f;
 		m_nGroupId = HITGROUP_GENERIC;
 		m_nShapeType = HITBOX_SHAPE_HULL;
 		m_bTranslationOnly = false;
@@ -255,7 +264,7 @@ public:
 		m_sSurfaceProperty = m_tempSurfaceProp;
 
 		m_sBoneName = m_tempBoneName;
-		m_nBoneNameHash = MakeStringToken( m_tempBoneName );
+		m_nBoneNameHash = CUtlStringToken( m_tempBoneName );
 
 		m_cRenderColor.SetColor( 0, 0, 0, 0 );
 	}
@@ -275,10 +284,11 @@ public:
 		m_nInteractsExclude = 0;
 		m_nInteractsAs = 0;
 		
-		m_nEntityIdsToIgnore[0] = static_cast<uint32>(-1);
-		m_nEntityIdsToIgnore[1] = static_cast<uint32>(-1);
-		m_nOwnerIdsToIgnore[0] = static_cast<uint32>(-1);
-		m_nOwnerIdsToIgnore[1] = static_cast<uint32>(-1);
+		m_nEntityIdsToIgnore[0] = -1;
+		m_nEntityIdsToIgnore[1] = -1;
+		
+		m_nOwnerIdsToIgnore[0] = -1;
+		m_nOwnerIdsToIgnore[1] = -1;
 		
 		m_nHierarchyIds[0] = 0;
 		m_nHierarchyIds[1] = 0;
@@ -413,7 +423,7 @@ public:
 		m_nInteractsWith = 0;
 		m_nInteractsExclude = 0;
 		m_nEntityId = 0;
-		m_nOwnerId = static_cast<uint32>(-1);
+		m_nOwnerId = -1;
 		m_nHierarchyId = 0;
 		m_nCollisionGroup = COLLISION_GROUP_ALWAYS;
 		m_nCollisionFunctionMask = FCOLLISION_FUNC_DEFAULT;

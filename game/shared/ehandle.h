@@ -11,24 +11,45 @@
 #pragma once
 #endif
 
-#if defined( _DEBUG ) && defined( GAME_DLL )
-#include "tier0/dbg.h"
-#include "cbase.h"
-#endif
-
-
-#include "const.h"
-#include "entityhandle.h"
 #include "entity2/entitysystem.h"
+#include "entity2/entityinstance.h"
+#include "entityhandle.h"
 
+// -------------------------------------------------------------------------------------------------- //
+// Game-code CBaseHandle implementation.
+// -------------------------------------------------------------------------------------------------- //
 
-class IHandleEntity;
+inline CEntityInstance* CEntityHandle::Get() const
+{
+	return GameEntitySystem()->GetEntityInstance( *this );
+}
+
+inline CEntityHandle CEntityHandle::FromPackedInt( uint32 packed_int_handle )
+{
+	if(packed_int_handle == 0xFFFFFF)
+		return CEntityHandle();
+
+	CEntityIndex index = packed_int_handle & 0x3FFF;
+	auto serial = (packed_int_handle >> 14) & 0x3FF;
+
+	auto entity = GameEntitySystem()->GetEntityInstance( index );
+	if(!entity)
+		return CEntityHandle();
+
+	auto ent_handle = entity->GetRefEHandle();
+
+	// Since we don't have the full serial part, validate the one we have
+	if((ent_handle.GetSerialNumber() & 0x3FF) != serial)
+		return CEntityHandle();
+
+	return ent_handle;
+}
 
 // -------------------------------------------------------------------------------------------------- //
 // CHandle.
 // -------------------------------------------------------------------------------------------------- //
-schema template< class T >
-class CHandle : public CBaseHandle
+template< class T >
+class CHandle : public CEntityHandle
 {
 public:
 
@@ -50,6 +71,7 @@ public:
 	bool	operator==( T *val ) const;
 	bool	operator!=( T *val ) const;
 	const CBaseHandle& operator=( const T *val );
+	const CBaseHandle& operator=( const CBaseHandle &val );
 
 	T*		operator->() const;
 };
@@ -137,13 +159,20 @@ inline bool CHandle<T>::operator!=( T *val ) const
 template<class T>
 void CHandle<T>::Set( const T* pVal )
 {
-	CBaseHandle::Set( pVal );
+	CBaseHandle::Set(pVal);
 }
 
 template<class T>
 inline const CBaseHandle& CHandle<T>::operator=( const T *val )
 {
 	Set( val );
+	return *this;
+}
+
+template<class T>
+inline const CBaseHandle &CHandle<T>::operator=( const CBaseHandle &val )
+{
+	Init( val.GetEntryIndex(), val.GetSerialNumber() );
 	return *this;
 }
 

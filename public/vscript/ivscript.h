@@ -96,11 +96,9 @@
 #define IVSCRIPT_H
 
 #include "platform.h"
-#include "tier0/logging.h"
 #include "datamap.h"
-#include "appframework/iappsystem.h"
+#include "appframework/IAppSystem.h"
 #include "tier1/functors.h"
-#include "schemasystem/schemametatag.h"
 #include "tier0/memdbgon.h"
 
 #if defined( _WIN32 )
@@ -118,6 +116,7 @@
 #endif
 
 class CUtlBuffer;
+class KeyValues;
 class CCommand;
 class CCommandContext;
 
@@ -148,13 +147,11 @@ public:
 	virtual void		HandleErrorMsg( const char *, void * ) = 0;
 };
 
-#define VSCRIPT_INTERFACE_VERSION		"VScriptManager010"
-
 class IScriptManager : public IAppSystem
 {
 public:
-	virtual IScriptVM *CreateVM( ScriptLanguage_t language = SL_DEFAULT, bool bEnableDebugLibrary = false ) = 0;
-	virtual void DestroyVM( IScriptVM *pVM ) = 0;
+	virtual IScriptVM *CreateVM( ScriptLanguage_t language = SL_DEFAULT ) = 0;
+	virtual void DestroyVM( IScriptVM * ) = 0;
 	virtual IScriptDebugger *GetDebugger() = 0;
 };
 
@@ -169,9 +166,9 @@ DECLARE_POINTER_HANDLE( HSCRIPT );
 // 
 //-----------------------------------------------------------------------------
 
-#include "variant.h"
+#include "entity2/variant.h"
 
-typedef uint8 ScriptDataType_t;
+typedef fieldtype_t ScriptDataType_t;
 typedef CVariant ScriptVariant_t;
 
 #define SCRIPT_VARIANT_NULL ScriptVariant_t()
@@ -190,46 +187,8 @@ DECLARE_DEDUCE_FIELDTYPE( FIELD_BOOLEAN, bool );
 DECLARE_DEDUCE_FIELDTYPE( FIELD_CHARACTER, char );
 DECLARE_DEDUCE_FIELDTYPE( FIELD_HSCRIPT, HSCRIPT );
 DECLARE_DEDUCE_FIELDTYPE( FIELD_VARIANT, ScriptVariant_t );
-DECLARE_DEDUCE_FIELDTYPE( FIELD_EHANDLE, CEntityHandle );
 
-#define ScriptDeduceType( T ) ScriptDeducer<T>::FIELD_TYPE
-
-template <typename T>
-inline const char * ScriptFieldTypeName() 
-{
-	T::using_unknown_script_type();
-	return nullptr;
-}
-
-#define DECLARE_NAMED_FIELDTYPE( fieldType, strName ) template <> inline const char * ScriptFieldTypeName<fieldType>() { return strName; }
-DECLARE_NAMED_FIELDTYPE( void,	"void" );
-DECLARE_NAMED_FIELDTYPE( float,	"float" );
-DECLARE_NAMED_FIELDTYPE( const char *,	"cstring" );
-DECLARE_NAMED_FIELDTYPE( char *,	"cstring" );
-DECLARE_NAMED_FIELDTYPE( Vector,	"vector" );
-DECLARE_NAMED_FIELDTYPE( const Vector&,	"vector" );
-DECLARE_NAMED_FIELDTYPE( int,	"integer" );
-DECLARE_NAMED_FIELDTYPE( bool,	"boolean" );
-DECLARE_NAMED_FIELDTYPE( char,	"character" );
-DECLARE_NAMED_FIELDTYPE( HSCRIPT,	"hscript" );
-DECLARE_NAMED_FIELDTYPE( ScriptVariant_t,	"variant" );
-DECLARE_NAMED_FIELDTYPE( CEntityHandle,	"ehandle" );
-
-inline const char* GetScriptTypeName(ScriptDataType_t type) {
-	switch(type) {
-	case FIELD_VOID:        return "void";
-	case FIELD_FLOAT32:     return "float";
-	case FIELD_CSTRING:     return "cstring";
-	case FIELD_VECTOR:      return "vector";
-	case FIELD_INT32:       return "integer";
-	case FIELD_BOOLEAN:     return "boolean";
-	case FIELD_CHARACTER:   return "character";
-	case FIELD_HSCRIPT:     return "hscript";
-	case FIELD_VARIANT:     return "variant";
-	case FIELD_EHANDLE:     return "ehandle";
-	default:                return "unknown";
-	}
-}
+#define ScriptDeduceType( T ) ((ScriptDataType_t)ScriptDeducer<T>::FIELD_TYPE)
 
 //---------------------------------------------------------
 
@@ -237,7 +196,6 @@ struct ScriptFuncDescriptor_t
 {
 	ScriptFuncDescriptor_t()
 	{
-		m_pszScriptName = NULL;
 		m_pszFunction = NULL;
 		m_ReturnType = FIELD_TYPEUNKNOWN;
 		m_iVariantCount = 0;
@@ -274,23 +232,21 @@ struct ScriptFuncDescriptor_t
 
 //---------------------------------------------------------
 
-struct ScriptClassDesc_t;
-
 enum ScriptFuncBindingFlags_t
 {
-	SF_MEMBER_NONE = 0,
-	SF_MEMBER_FUNC = 1 << 0,
+	SF_MEMBER_FUNC	= 0x01,
 };
 
+struct ScriptClassDesc_t;
+
 typedef bool (*ScriptBindingFunc_t)( void *pFunction, void *pContext, ScriptVariant_t *pArguments, int nArguments, ScriptVariant_t *pReturn );
-typedef void* ScriptFunctionBindingStorageType_t;
 
 struct ScriptFunctionBinding_t
 {
-	ScriptFuncDescriptor_t m_desc;
-	ScriptClassDesc_t *m_pClassDesc;
-	ScriptBindingFunc_t m_pfnBinding;
-	ScriptFunctionBindingStorageType_t m_pFunction;
+	ScriptFuncDescriptor_t	m_desc;
+	ScriptClassDesc_t *		m_pClassDesc;
+	ScriptBindingFunc_t		m_pfnBinding;
+	void *					m_pFunction;
 	ScriptFuncBindingFlags_t m_flags;
 };
 
@@ -320,15 +276,6 @@ struct ScriptClassDesc_t
 	IScriptInstanceHelper *				pHelper; // optional helper
 };
 
-//---------------------------------------------------------
-// A simple variant type. Intentionally not full featured (no implicit conversion, no memory management)
-//---------------------------------------------------------
-
-enum SVFlags_t
-{
-	SV_FREE = 0x01,
-};
-
 //-----------------------------------------------------------------------------
 // 
 //-----------------------------------------------------------------------------
@@ -337,11 +284,11 @@ enum SVFlags_t
 
 // Lower level macro primitives
 #define ScriptInitFunctionBinding( pScriptFunction, func )									ScriptInitFunctionBindingNamed( pScriptFunction, func, #func )
-#define ScriptInitFunctionBindingNamed( pScriptFunction, func, scriptName )					do { ScriptInitFuncDescriptorNamed( (&(pScriptFunction)->m_desc), func, scriptName ); (pScriptFunction)->m_pfnBinding = ScriptCreateBinding( &func ); (pScriptFunction)->m_pFunction = (void *)&func; } while (0)
+#define ScriptInitFunctionBindingNamed( pScriptFunction, func, scriptName )					do { ScriptInitFuncDescriptorNamed( (&(pScriptFunction)->m_desc), func, scriptName ); (pScriptFunction)->m_pClassDesc = NULL; (pScriptFunction)->m_pfnBinding = ScriptCreateBinding( &func ); (pScriptFunction)->m_pFunction = (void *)&func; (pScriptFunction)->m_flags = ScriptFuncBindingFlags_t(0); } while (0)
 
 #define ScriptInitMemberFunctionBinding( pScriptFunction, class, func )						ScriptInitMemberFunctionBinding_( pScriptFunction, class, func, #func )
 #define ScriptInitMemberFunctionBindingNamed( pScriptFunction, class, func, scriptName )	ScriptInitMemberFunctionBinding_( pScriptFunction, class, func, scriptName )
-#define ScriptInitMemberFunctionBinding_( pScriptFunction, class, func, scriptName ) 		do { ScriptInitMemberFuncDescriptor_( (&(pScriptFunction)->m_desc), class, func, scriptName ); (pScriptFunction)->m_pfnBinding = ScriptCreateBinding( ((class *)0), &class::func ); 	(pScriptFunction)->m_pFunction = ScriptConvertFuncPtrToVoid( &class::func ); (pScriptFunction)->m_flags = SF_MEMBER_FUNC;  } while (0)
+#define ScriptInitMemberFunctionBinding_( pScriptFunction, class, func, scriptName ) 		do { ScriptInitMemberFuncDescriptor_( (&(pScriptFunction)->m_desc), class, func, scriptName ); (pScriptFunction)->m_pClassDesc = NULL; (pScriptFunction)->m_pfnBinding = ScriptCreateBinding( ((class *)0), &class::func ); 	(pScriptFunction)->m_pFunction = ScriptConvertFuncPtrToVoid( &class::func ); (pScriptFunction)->m_flags = SF_MEMBER_FUNC;  } while (0)
 
 #define ScriptInitClassDesc( pClassDesc, class, pBaseClassDesc )							ScriptInitClassDescNamed( pClassDesc, class, pBaseClassDesc, #class )
 #define ScriptInitClassDescNamed( pClassDesc, class, pBaseClassDesc, scriptName )			ScriptInitClassDescNamed_( pClassDesc, class, pBaseClassDesc, scriptName )
@@ -350,14 +297,14 @@ enum SVFlags_t
 #define ScriptInitClassDescNamed_( pClassDesc, class, pBaseClassDesc, scriptName )			do { (pClassDesc)->m_pszScriptName = scriptName; (pClassDesc)->m_pszClassname = #class; (pClassDesc)->m_pBaseDesc = pBaseClassDesc; } while ( 0 )
 
 #define ScriptAddFunctionToClassDesc( pClassDesc, class, func, description  )				ScriptAddFunctionToClassDescNamed( pClassDesc, class, func, #func, description )
-#define ScriptAddFunctionToClassDescNamed( pClassDesc, class, func, scriptName, description ) do { ScriptFunctionBinding_t *pBinding = &((pClassDesc)->m_FunctionBindings[(pClassDesc)->m_FunctionBindings.AddToTail()]); pBinding->m_desc.m_pszDescription = description; ScriptInitMemberFunctionBindingNamed( pBinding, class, func, scriptName );  } while (0)
+#define ScriptAddFunctionToClassDescNamed( pClassDesc, class, func, scriptName, description ) do { ScriptFunctionBinding_t *pBinding = &((pClassDesc)->m_FunctionBindings[(pClassDesc)->m_FunctionBindings.AddToTail()]); pBinding->m_desc.m_pszDescription = description; ScriptInitMemberFunctionBindingNamed( pBinding, class, func, scriptName ); pBinding->m_pClassDesc = pClassDesc; } while (0)
 
 //-----------------------------------------------------------------------------
 // 
 //-----------------------------------------------------------------------------
 
 #define ScriptRegisterFunction( pVM, func, description )									ScriptRegisterFunctionNamed( pVM, func, #func, description )
-#define ScriptRegisterFunctionNamed( pVM, func, scriptName, description )					do { static ScriptFunctionBinding_t binding; binding.m_desc.m_pszDescription = description; binding.m_desc.m_Parameters.RemoveAll(); ScriptInitFunctionBindingNamed( &binding, func, scriptName ); pVM->RegisterFunction( &binding ); } while (0)
+#define ScriptRegisterFunctionNamed( pVM, func, scriptName, description )					do { static ScriptFunctionBinding_t binding; binding.m_desc.m_pszDescription = description; ScriptInitFunctionBindingNamed( &binding, func, scriptName ); pVM->RegisterFunction( &binding ); } while (0)
 
 //-----------------------------------------------------------------------------
 // 
@@ -450,6 +397,7 @@ enum ScriptErrorLevel_t
 
 typedef void ( *ScriptOutputFunc_t )( const char *pszText );
 typedef bool ( *ScriptErrorFunc_t )( ScriptErrorLevel_t eLevel, const char *pszText );
+typedef bool ( *ScriptKeyValuesFromTableFunc_t )( KeyValues *pKeyValues, const char *pszKey, const ScriptVariant_t &value, void *pContext );
 
 //-----------------------------------------------------------------------------
 // 
@@ -466,17 +414,16 @@ enum ScriptStatus_t
 	SCRIPT_RUNNING,
 };
 
-class CSquirrelMetamethodDelegateImpl;
-
 class IScriptVM
 {
 public:
-	virtual ~IScriptVM() = default;
+	virtual ~IScriptVM() {}
 
 	virtual bool Init() = 0;
 	virtual void Shutdown() = 0;
 
-	virtual void DisableExecution() = 0;
+	// AMNOTE: Makes ExecuteFunction fail with SCRIPT_ERROR from then on, Run is unaffected
+	virtual void DisableExecuteFunction() = 0;
 
 	virtual ScriptLanguage_t GetLanguage() = 0;
 	virtual const char *GetLanguageName() = 0;
@@ -499,6 +446,7 @@ public:
 	// Simple script usage
 	//--------------------------------------------------------
 	virtual ScriptStatus_t Run( const char *pszScript, bool bWait = true ) = 0;
+	inline ScriptStatus_t Run( const unsigned char *pszScript, bool bWait = true ) { return Run( (char *)pszScript, bWait ); }
 
 	//--------------------------------------------------------
 	// Compilation
@@ -507,10 +455,14 @@ public:
 	inline HSCRIPT CompileScript( const unsigned char *pszScript, const char *pszId = NULL ) { return CompileScript( (char *)pszScript, pszId ); }
 	virtual void ReleaseScript( HSCRIPT ) = 0;
 
+	//--------------------------------------------------------
+	// Execution of compiled
+	//--------------------------------------------------------
 	virtual ScriptStatus_t Run( HSCRIPT hScript, HSCRIPT hScope = NULL, bool bWait = true ) = 0;
 	virtual ScriptStatus_t Run( HSCRIPT hScript, bool bWait ) = 0;
 
-	virtual HSCRIPT GetCurrentScope() = 0;
+	// AMNOTE: Returns the script or function that Run or ExecuteFunction is currently running, NULL outside of them
+	virtual HSCRIPT GetExecutingScript() = 0;
 
 	//--------------------------------------------------------
 	// Scope
@@ -550,7 +502,7 @@ public:
 	template <typename T> HSCRIPT RegisterInstance( T *pInstance, const char *pszInstance, HSCRIPT hScope = NULL)					{ HSCRIPT hInstance = RegisterInstance( GetScriptDesc( pInstance ), pInstance ); SetValue( hScope, pszInstance, hInstance ); return hInstance; }
 	virtual void RemoveInstance( HSCRIPT ) = 0;
 	void RemoveInstance( HSCRIPT hInstance, const char *pszInstance, HSCRIPT hScope = NULL )										{ ClearValue( hScope, pszInstance ); RemoveInstance( hInstance ); }
-	void RemoveInstance( const char *pszInstance, HSCRIPT hScope = NULL )															{ ScriptVariant_t val; if ( GetValue( hScope, pszInstance, &val ) ) { if ( val.m_type == FIELD_HSCRIPT ) { RemoveInstance( val, pszInstance, hScope ); } ReleaseValue( val ); } }
+	void RemoveInstance( const char *pszInstance, HSCRIPT hScope = NULL )															{ ScriptVariant_t val; if ( GetValue( hScope, pszInstance, &val ) ) { if ( val.GetType() == FIELD_HSCRIPT ) { RemoveInstance( val, pszInstance, hScope ); } ReleaseValue( val ); } }
 
 	virtual void *GetInstanceValue( HSCRIPT hInstance, ScriptClassDesc_t *pExpectedType = NULL ) = 0;
 
@@ -576,24 +528,23 @@ public:
 	virtual int	GetNumTableEntries( HSCRIPT hScope ) = 0;
 	virtual int GetNumElements( HSCRIPT hScope ) = 0;
 	virtual int GetKeyValue( HSCRIPT hScope, int nIterator, ScriptVariant_t *pKey, ScriptVariant_t *pValue ) = 0;
-	virtual bool CreateKeyValuesFromTable(HSCRIPT hScope, const char* unk1, void* fUnk, void* unk2) = 0;
+	// The caller owns the returned KeyValues. pfnCallback may be NULL, keys it returns true for are not added
+	virtual KeyValues *CreateKeyValuesFromTable(HSCRIPT hScope, const char* pszName, ScriptKeyValuesFromTableFunc_t pfnCallback, void* pContext) = 0;
 
 	virtual bool GetValue( HSCRIPT hScope, const char *pszKey, ScriptVariant_t *pValue ) = 0;
 	virtual bool GetValue( HSCRIPT hScope, int nIndex, ScriptVariant_t *pValue ) = 0;
-
 	bool GetValue( const char *pszKey, ScriptVariant_t *pValue )																	{ return GetValue(NULL, pszKey, pValue ); }
-
 	virtual bool GetScalarValue( HSCRIPT hScope, ScriptVariant_t *pValue ) = 0;
-	virtual ScriptVariant_t CopyValue( ScriptVariant_t &value ) = 0;
+	virtual void CopyValue( const ScriptVariant_t &src, ScriptVariant_t *pDest ) = 0;
 	virtual void ReleaseValue( ScriptVariant_t &value ) = 0;
 
 	virtual bool ClearValue( HSCRIPT hScope, const char *pszKey ) = 0;
 	bool ClearValue( const char *pszKey)																							{ return ClearValue( NULL, pszKey ); }
 	
-	virtual HSCRIPT CreateArray( ScriptVariant_t & ) = 0;
+	virtual void CreateArray( ScriptVariant_t &Array ) = 0;
 	virtual bool IsArray( HSCRIPT hScope ) = 0;
 	virtual int GetArrayCount( HSCRIPT hScope ) = 0;
-	virtual void ArrayAddToTail( HSCRIPT hScope, const ScriptVariant_t &pValue ) = 0;
+	virtual int ArrayAddToTail( HSCRIPT hScope, const ScriptVariant_t &pValue ) = 0;
 	
 	//----------------------------------------------------------------------------
 
@@ -618,9 +569,9 @@ public:
 	// Returns 0 on success
 	virtual int LoadAndCompileScriptFile( const char *pszFile, const char *pszPathId, HSCRIPT *pScript ) = 0;
 
-	virtual void GetSourceId( HSCRIPT hScope, char *pBuf, unsigned int nBufSize ) = 0;
+	virtual void GetSourceId( HSCRIPT hScope, char *pBuf, int nBufSize ) = 0;
 
-	virtual bool AreHandlesEqual( HSCRIPT handle1, HSCRIPT handle2 ) = 0;
+	virtual bool AreHandlesEqual( HSCRIPT hScript1, HSCRIPT hScript2 ) = 0;
 
 	//----------------------------------------------------------------------------
 	// Call API
@@ -715,26 +666,8 @@ public:
 		ScriptVariant_t args[12]; args[0] = arg1; args[1] = arg2; args[2] = arg3; args[3] = arg4; args[4] = arg5; args[5] = arg6; args[6] = arg7; args[7] = arg8; args[8] = arg9; args[9] = arg10; args[10] = arg11; args[11] = arg12;
 		return ExecuteFunction( hFunction, args, Q_ARRAYSIZE(args), pReturn, hScope, bWait );
 	}
-
-	template <typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13>
-	ScriptStatus_t Call( HSCRIPT hFunction, HSCRIPT hScope, bool bWait, ScriptVariant_t *pReturn, ARG_TYPE_1 arg1, ARG_TYPE_2 arg2, ARG_TYPE_3 arg3, ARG_TYPE_4 arg4, ARG_TYPE_5 arg5, ARG_TYPE_6 arg6, ARG_TYPE_7 arg7, ARG_TYPE_8 arg8, ARG_TYPE_9 arg9, ARG_TYPE_10 arg10, ARG_TYPE_11 arg11, ARG_TYPE_12 arg12, ARG_TYPE_13 arg13 )
-	{
-		ScriptVariant_t args[13]; args[0] = arg1; args[1] = arg2; args[2] = arg3; args[3] = arg4; args[4] = arg5; args[5] = arg6; args[6] = arg7; args[7] = arg8; args[8] = arg9; args[9] = arg10; args[10] = arg11; args[11] = arg12; args[12] = arg13;
-		return ExecuteFunction( hFunction, args, ARRAYSIZE(args), pReturn, hScope, bWait );
-	}
-
-	template <typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13, typename ARG_TYPE_14>
-	ScriptStatus_t Call( HSCRIPT hFunction, HSCRIPT hScope, bool bWait, ScriptVariant_t *pReturn, ARG_TYPE_1 arg1, ARG_TYPE_2 arg2, ARG_TYPE_3 arg3, ARG_TYPE_4 arg4, ARG_TYPE_5 arg5, ARG_TYPE_6 arg6, ARG_TYPE_7 arg7, ARG_TYPE_8 arg8, ARG_TYPE_9 arg9, ARG_TYPE_10 arg10, ARG_TYPE_11 arg11, ARG_TYPE_12 arg12, ARG_TYPE_13 arg13, ARG_TYPE_14 arg14 )
-	{
-		ScriptVariant_t args[14]; args[0] = arg1; args[1] = arg2; args[2] = arg3; args[3] = arg4; args[4] = arg5; args[5] = arg6; args[6] = arg7; args[7] = arg8; args[8] = arg9; args[9] = arg10; args[10] = arg11; args[11] = arg12; args[12] = arg13; args[13] = arg14; 
-		return ExecuteFunction( hFunction, args, ARRAYSIZE(args), pReturn, hScope, bWait );
-	}
-
 };
 
-extern IScriptVM *g_pScriptVM;
-
-DECLARE_LOGGING_CHANNEL( LOG_VSCRIPT );
 
 //-----------------------------------------------------------------------------
 // Script scope helper class
@@ -745,6 +678,7 @@ class CDefScriptScopeBase
 public:
 	static IScriptVM *GetVM()
 	{
+		extern IScriptVM *g_pScriptVM;
 		return g_pScriptVM;
 	}
 };
@@ -976,20 +910,6 @@ public:
 		return GetVM()->ExecuteFunction( hFunction, args, Q_ARRAYSIZE(args), pReturn, m_hScope, true );
 	}
 
-	template <typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13>
-	ScriptStatus_t Call( HSCRIPT hFunction, ScriptVariant_t *pReturn, ARG_TYPE_1 arg1, ARG_TYPE_2 arg2, ARG_TYPE_3 arg3, ARG_TYPE_4 arg4, ARG_TYPE_5 arg5, ARG_TYPE_6 arg6, ARG_TYPE_7 arg7, ARG_TYPE_8 arg8, ARG_TYPE_9 arg9, ARG_TYPE_10 arg10, ARG_TYPE_11 arg11, ARG_TYPE_12 arg12, ARG_TYPE_13 arg13 )
-	{
-		ScriptVariant_t args[13]; args[0] = arg1; args[1] = arg2; args[2] = arg3; args[3] = arg4; args[4] = arg5; args[5] = arg6; args[6] = arg7; args[7] = arg8; args[8] = arg9; args[9] = arg10; args[10] = arg11; args[11] = arg12; args[12] = arg13;
-		return GetVM()->ExecuteFunction( hFunction, args, ARRAYSIZE(args), pReturn, m_hScope, true );
-	}
-
-	template <typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13, typename ARG_TYPE_14>
-	ScriptStatus_t Call( HSCRIPT hFunction, ScriptVariant_t *pReturn, ARG_TYPE_1 arg1, ARG_TYPE_2 arg2, ARG_TYPE_3 arg3, ARG_TYPE_4 arg4, ARG_TYPE_5 arg5, ARG_TYPE_6 arg6, ARG_TYPE_7 arg7, ARG_TYPE_8 arg8, ARG_TYPE_9 arg9, ARG_TYPE_10 arg10, ARG_TYPE_11 arg11, ARG_TYPE_12 arg12, ARG_TYPE_13 arg13, ARG_TYPE_14 arg14 )
-	{
-		ScriptVariant_t args[14]; args[0] = arg1; args[1] = arg2; args[2] = arg3; args[3] = arg4; args[4] = arg5; args[5] = arg6; args[6] = arg7; args[7] = arg8; args[8] = arg9; args[9] = arg10; args[10] = arg11; args[11] = arg12; args[12] = arg13; args[13] = arg14; 
-		return GetVM()->ExecuteFunction( hFunction, args, ARRAYSIZE(args), pReturn, m_hScope, true );
-	}
-
 	ScriptStatus_t Call( const char *pszFunction, ScriptVariant_t *pReturn = NULL )
 	{
 		HSCRIPT hFunction = GetVM()->LookupFunction( pszFunction, m_hScope );
@@ -1144,30 +1064,6 @@ public:
 		return status;
 	}
 
-	template <typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13>
-	ScriptStatus_t Call( const char *pszFunction, ScriptVariant_t *pReturn, ARG_TYPE_1 arg1, ARG_TYPE_2 arg2, ARG_TYPE_3 arg3, ARG_TYPE_4 arg4, ARG_TYPE_5 arg5, ARG_TYPE_6 arg6, ARG_TYPE_7 arg7, ARG_TYPE_8 arg8, ARG_TYPE_9 arg9, ARG_TYPE_10 arg10, ARG_TYPE_11 arg11, ARG_TYPE_12 arg12, ARG_TYPE_13 arg13 )
-	{
-		ScriptVariant_t args[13]; args[0] = arg1; args[1] = arg2; args[2] = arg3; args[3] = arg4; args[4] = arg5; args[5] = arg6; args[6] = arg7; args[7] = arg8; args[8] = arg9; args[9] = arg10; args[10] = arg11; args[11] = arg12; args[12] = arg13;
-		HSCRIPT hFunction = GetVM()->LookupFunction( pszFunction, m_hScope );
-		if ( !hFunction )
-			return SCRIPT_ERROR;
-		ScriptStatus_t status = GetVM()->ExecuteFunction( hFunction, args, ARRAYSIZE(args), pReturn, m_hScope, true );
-		GetVM()->ReleaseFunction( hFunction );
-		return status;
-	}
-
-	template <typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13, typename ARG_TYPE_14>
-	ScriptStatus_t Call( const char *pszFunction, ScriptVariant_t *pReturn, ARG_TYPE_1 arg1, ARG_TYPE_2 arg2, ARG_TYPE_3 arg3, ARG_TYPE_4 arg4, ARG_TYPE_5 arg5, ARG_TYPE_6 arg6, ARG_TYPE_7 arg7, ARG_TYPE_8 arg8, ARG_TYPE_9 arg9, ARG_TYPE_10 arg10, ARG_TYPE_11 arg11, ARG_TYPE_12 arg12, ARG_TYPE_13 arg13, ARG_TYPE_14 arg14 )
-	{
-		ScriptVariant_t args[14]; args[0] = arg1; args[1] = arg2; args[2] = arg3; args[3] = arg4; args[4] = arg5; args[5] = arg6; args[6] = arg7; args[7] = arg8; args[8] = arg9; args[9] = arg10; args[10] = arg11; args[11] = arg12; args[12] = arg13; args[13] = arg14; 
-		HSCRIPT hFunction = GetVM()->LookupFunction( pszFunction, m_hScope );
-		if ( !hFunction )
-			return SCRIPT_ERROR;
-		ScriptStatus_t status = GetVM()->ExecuteFunction( hFunction, args, ARRAYSIZE(args), pReturn, m_hScope, true );
-		GetVM()->ReleaseFunction( hFunction );
-		return status;
-	}
-
 protected:
 	HSCRIPT m_hScope;
 	int m_flags;
@@ -1275,8 +1171,6 @@ public:
 #define DEFINE_SCRIPT_PROXY_10( FuncName ) DEFINE_SCRIPT_PROXY_GUTS( FuncName, 10 )
 #define DEFINE_SCRIPT_PROXY_11( FuncName ) DEFINE_SCRIPT_PROXY_GUTS( FuncName, 11 )
 #define DEFINE_SCRIPT_PROXY_12( FuncName ) DEFINE_SCRIPT_PROXY_GUTS( FuncName, 12 )
-#define DEFINE_SCRIPT_PROXY_13( FuncName ) DEFINE_SCRIPT_PROXY_GUTS( FuncName, 13 )
-#define DEFINE_SCRIPT_PROXY_14( FuncName ) DEFINE_SCRIPT_PROXY_GUTS( FuncName, 14 )
 
 #define DEFINE_SCRIPT_PROXY_1V( FuncName ) DEFINE_SCRIPT_PROXY_GUTS_NO_RETVAL( FuncName, 1 )
 #define DEFINE_SCRIPT_PROXY_2V( FuncName ) DEFINE_SCRIPT_PROXY_GUTS_NO_RETVAL( FuncName, 2 )
@@ -1290,12 +1184,8 @@ public:
 #define DEFINE_SCRIPT_PROXY_10V( FuncName ) DEFINE_SCRIPT_PROXY_GUTS_NO_RETVAL( FuncName, 10 )
 #define DEFINE_SCRIPT_PROXY_11V( FuncName ) DEFINE_SCRIPT_PROXY_GUTS_NO_RETVAL( FuncName, 11 )
 #define DEFINE_SCRIPT_PROXY_12V( FuncName ) DEFINE_SCRIPT_PROXY_GUTS_NO_RETVAL( FuncName, 12 )
-#define DEFINE_SCRIPT_PROXY_13V( FuncName ) DEFINE_SCRIPT_PROXY_GUTS_NO_RETVAL( FuncName, 13 )
-#define DEFINE_SCRIPT_PROXY_14V( FuncName ) DEFINE_SCRIPT_PROXY_GUTS_NO_RETVAL( FuncName, 14 )
 
 //-----------------------------------------------------------------------------
-
-DECLARE_SCHEMA_META_TAG( MScriptDescription, META_TAG_ON_FIELD, META_VALUE( const char * ) );
 
 #include "tier0/memdbgoff.h"
 

@@ -10,12 +10,12 @@
 #pragma once
 #endif
 
-#include "appframework/iappsystem.h"
-#include "tier0/characterset.h"
-#include "tier0/memalloc.h"
-#include "tier0/utlstring.h"
+#include "appframework/IAppSystem.h"
 #include "tier1/utlvector.h"
-#include "mathlib/vector4d.h"
+#include "tier1/characterset.h"
+#include "utllinkedlist.h"
+#include "utlhashtable.h"
+#include "tier0/memalloc.h"
 #include "convar.h"
 #include <cstdint>
 #include <functional>
@@ -39,7 +39,6 @@
 // Shorthand helper to iterate registered concommands
 #define FOR_EACH_CONCOMMAND( iter ) for(ConCommandRef iter = icvar->FindFirstConCommand(); iter.IsValidRef(); iter = icvar->FindNextConCommand( iter ))
 
-
 struct ConVarSnapshot_t;
 class KeyValues;
 
@@ -48,7 +47,7 @@ typedef std::function<void( FnGenericChangeCallbackProvider_t, FnGenericChangeCa
 //-----------------------------------------------------------------------------
 // Called when a ConVar changes value
 //-----------------------------------------------------------------------------
-typedef void(*FnChangeCallbackGlobal_t)(ConVarRefAbstract* ref, CSplitScreenSlot nSlot, const char *pNewValue, const char *pOldValue, void *__unk01);
+typedef void(*FnChangeCallbackGlobal_t)(ConVarRefAbstract* ref, CSplitScreenSlot nSlot, const char *pNewValue, const char *pOldValue, ConVarUserInfoSet_t *userinfo_data);
 
 //-----------------------------------------------------------------------------
 // ConVar & ConCommand creation listener callbacks
@@ -71,11 +70,11 @@ public:
 	virtual ConVarRef		FindFirstConVar() = 0;
 	virtual ConVarRef		FindNextConVar( ConVarRef prev ) = 0;
 
-	virtual void			CallChangeCallback( ConVarRef cvar, const CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, void *__unk01 = nullptr ) = 0;
+	virtual void			CallChangeCallback( ConVarRef cvar, const CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, ConVarUserInfoSet_t *userinfo_data = nullptr ) = 0;
 	// Would call cb for every change callback defined for this cvar
 	virtual void			IterateConVarCallbacks( ConVarRef cvar, FnCvarCallbacksReader_t cb ) = 0;
 	// If returns false value shouldn't be modified
-	virtual bool			CallFilterCallback( ConVarRef cvar, const CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, void *__unk01 = nullptr ) = 0;
+	virtual bool			CallFilterCallback( ConVarRef cvar, const CSplitScreenSlot nSlot, const CVValue_t *pNewValue, const CVValue_t *pOldValue, ConVarUserInfoSet_t *userinfo_data = nullptr ) = 0;
 
 	// allow_defensive - Allows finding commands with FCVAR_DEFENSIVE flag
 	virtual ConCommandRef	FindConCommand( const char *name, bool allow_defensive = false ) = 0;
@@ -86,7 +85,7 @@ public:
 	// Install a global change callback (to be called when any convar changes) 
 	virtual void			InstallGlobalChangeCallback( FnChangeCallbackGlobal_t callback ) = 0;
 	virtual void			RemoveGlobalChangeCallback( FnChangeCallbackGlobal_t callback ) = 0;
-	virtual void			CallGlobalChangeCallbacks( ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const char *newValue, const char *oldValue, void *__unk01 = nullptr ) = 0;
+	virtual void			CallGlobalChangeCallbacks( ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const char *newValue, const char *oldValue, ConVarUserInfoSet_t *userinfo_data = nullptr ) = 0;
 
 	// Reverts cvars to default values which contain a specific flag,
 	// cvars with a flag FCVAR_COMMANDLINE_ENFORCED would be skipped
@@ -102,7 +101,7 @@ public:
 	// ignores FCVAR_COMMANDLINE_ENFORCED
 	virtual void				ResetConVarsToDefaultValuesByName( const char *pszPrefix ) = 0;
 
-	virtual ConVarSnapshot_t	*TakeConVarSnapshot( uint64 nFlags ) = 0;
+	virtual ConVarSnapshot_t	*TakeConVarSnapshot( void ) = 0;
 	virtual void				ResetConVarsToSnapshot( ConVarSnapshot_t *pSnapshot ) = 0;
 	virtual void				DestroyConVarSnapshot( ConVarSnapshot_t *pSnapshot ) = 0;
 
@@ -115,8 +114,9 @@ public:
 	
 	// Returns total bytesize needed to store all the FCVAR_USERINFO cvar values
 	virtual int					GetTotalUserInfoCvarsByteSize() = 0;
+	// Copies default values of all cvars which have FCVAR_USERINFO flag to the buffer in a byte range from->to
 	// if copy_or_cleanup is true, if false would cleanup the buffer
-	virtual void				CopyUserInfoCvarDefaults( uint8* buffer, uint64 from, uint64 to, bool copy_or_cleanup ) = 0;
+	virtual void				CopyUserInfoCvarDefaults( ConVarUserInfoSet_t buffer, int from, int to, bool copy_or_cleanup ) = 0;
 
 	// Calls completion callbacks on cvars and concommands if they exist, successful would be true if so
 	// Cvars & Concommands needs to have FCVAR_VCONSOLE_FUZZY_MATCHING for successful to be true if callbacks are available
@@ -144,7 +144,7 @@ public:
 	virtual ConCommandData*		GetConCommandData( ConCommandRef cmd ) = 0;
 
 	// Queues up value (creates a copy of it) to be set when convar is ready to be edited
-	virtual void				QueueThreadSetValue( ConVarRefAbstract* ref, CSplitScreenSlot nSlot, void* __unk01, CVValue_t* value ) = 0;
+	virtual void				QueueThreadSetValue( ConVarRefAbstract* ref, CSplitScreenSlot nSlot, ConVarUserInfoSet_t *userinfo_data, CVValue_t* value ) = 0;
 
 private:
 	int m_MaxSplitScreenSlots;
@@ -248,7 +248,7 @@ public:
 	{
 		ConVarRefAbstract *m_ConVar;
 		CSplitScreenSlot m_Slot;
-		void *m_unk001;
+		ConVarUserInfoSet_t *m_UserinfoData;
 		CVValue_t *m_Value;
 	};
 
@@ -305,7 +305,6 @@ public:
 //-----------------------------------------------------------------------------
 
 // These are marked DLL_EXPORT for Linux.
-DECLARE_TIER1_INTERFACE( ICvar, cvar );
 DECLARE_TIER1_INTERFACE( ICvar, g_pCVar );
 
 

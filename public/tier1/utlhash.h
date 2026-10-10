@@ -14,6 +14,7 @@
 #include <limits.h>
 #include "utlvector.h"
 #include "utllinkedlist.h"
+#include "utllinkedlist.h"
 #include "utlcommon.h"
 #include "commonmacros.h"
 #include "generichash.h"
@@ -29,7 +30,7 @@ public:
 	typedef K KeyFunc_t;
 	
 	// constructor/deconstructor
-	explicit CUtlHash( int bucketCount = 0, int growCount = 0, int initCount = 0,
+	CUtlHash( int bucketCount = 0, int growCount = 0, int initCount = 0,
 		      CompareFunc_t compareFunc = 0, KeyFunc_t keyFunc = 0 );
 	~CUtlHash();
 
@@ -225,7 +226,7 @@ inline bool CUtlHash<Data, C, K>::DoFind( Data const &src, unsigned int *pBucket
 		*pBucket = ndxBucket = key % bucketCount;
 	}
 
-	int ndxKeyData = 0;
+	int ndxKeyData;
 	const CUtlVector<Data> &bucket = m_Buckets[ndxBucket];
 	int keyDataCount = bucket.Count();
 	for( ndxKeyData = 0; ndxKeyData < keyDataCount; ndxKeyData++ )
@@ -248,7 +249,7 @@ template<class Data, typename C, typename K>
 inline UtlHashHandle_t CUtlHash<Data, C, K>::Find( Data const &src ) const
 {
 	unsigned int ndxBucket;
-	int ndxKeyData = 0;
+	int ndxKeyData;
 
 	if ( DoFind( src, &ndxBucket, &ndxKeyData ) )
 	{
@@ -264,7 +265,7 @@ template<class Data, typename C, typename K>
 inline UtlHashHandle_t CUtlHash<Data, C, K>::Insert( Data const &src )
 {
 	unsigned int ndxBucket;
-	int ndxKeyData = 0;
+	int ndxKeyData;
 
 	if ( DoFind( src, &ndxBucket, &ndxKeyData ) )
 	{
@@ -282,7 +283,7 @@ template<class Data, typename C, typename K>
 inline UtlHashHandle_t CUtlHash<Data, C, K>::Insert( Data const &src, bool *pDidInsert )
 {
 	unsigned int ndxBucket;
-	int ndxKeyData = 0;
+	int ndxKeyData;
 
 	if ( DoFind( src, &ndxBucket, &ndxKeyData ) )
 	{
@@ -303,7 +304,7 @@ template<class Data, typename C, typename K>
 inline UtlHashHandle_t CUtlHash<Data, C, K>::AllocEntryFromKey( Data const &src )
 {
 	unsigned int ndxBucket;
-	int ndxKeyData = 0;
+	int ndxKeyData;
 
 	if ( DoFind( src, &ndxBucket, &ndxKeyData ) )
 	{
@@ -570,13 +571,13 @@ public:
 	template <typename HashData>
 	struct HashFastData_t_
 	{
-		uintp	m_uiKey;
+		uintp		m_uiKey;
 		HashData	m_Data;
 	};
 
 	typedef HashFastData_t_<Data> HashFastData_t;
 
-	uintp						m_uiBucketMask;	
+	unsigned int						m_uiBucketMask;	
 	CUtlVector<UtlHashFastHandle_t>		m_aBuckets;
 	CUtlFixedLinkedList<HashFastData_t>	m_aDataPool;
 
@@ -646,7 +647,7 @@ template<class Data, class HashFuncs> inline int CUtlHashFast<Data,HashFuncs>::C
 */
 
 //-----------------------------------------------------------------------------
-// Purpose: Insert data into the hash table given its key (uintp), with
+// Purpose: Insert data into the hash table given its key (unsigned int), with
 //          a check to see if the element already exists within the tree.
 //-----------------------------------------------------------------------------
 template<class Data, class HashFuncs> inline UtlHashFastHandle_t CUtlHashFast<Data,HashFuncs>::Insert( uintp uiKey, const Data &data )
@@ -660,7 +661,7 @@ template<class Data, class HashFuncs> inline UtlHashFastHandle_t CUtlHashFast<Da
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Insert data into the hash table given its key (uintp),
+// Purpose: Insert data into the hash table given its key (unsigned int),
 //          without a check to see if the element already exists within the tree.
 //-----------------------------------------------------------------------------
 template<class Data, class HashFuncs> inline UtlHashFastHandle_t CUtlHashFast<Data,HashFuncs>::FastInsert( uintp uiKey, const Data &data )
@@ -803,7 +804,7 @@ template<class Data, class HashFuncs>
 	int bucketCount = m_aBuckets.Count();
 	for ( int bucket = iter.bucket+1 ; bucket < bucketCount ; ++bucket )
 	{
-		UtlHashFastHandle_t next = m_aBuckets[bucket]; // get the head of the bucket
+		next = m_aBuckets[bucket]; // get the head of the bucket
 		if (next != invalidIndex)
 			return UtlHashFastIterator_t( bucket, next );
 	}
@@ -829,7 +830,7 @@ template<class Data, class HashFuncs> inline bool CUtlHashFast<Data,HashFuncs>::
 // Fixed Hash
 //
 // Number of buckets must be a power of 2.
-// Key must be pointer-size (uintp).
+// Key must be 32-bits (unsigned int).
 //
 typedef intp UtlHashFixedHandle_t;
 
@@ -1073,7 +1074,7 @@ public:
 	//	void Purge( void );
 
 	// Invalid handle.
-	static UtlHashFastHandle_t InvalidHandle( void )	{ return (unsigned int)~0; }
+	static const UtlHashFastHandle_t InvalidHandle( void )	{ return (unsigned int)~0; }
 
 	// Initialize.
 	bool Init( int nBucketCount );

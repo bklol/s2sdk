@@ -185,7 +185,8 @@ inline void *ScriptConvertFuncPtrToVoid( FUNCPTR_TYPE pFunc )
 	}
 	else if ( ( sizeof( FUNCPTR_TYPE ) == sizeof( void * ) * 2 ) )
 	{
-		// Itanium C++ ABI: an odd ptr marks a virtual function
+		// Itanium C++ ABI: for a virtual function, ptr is 1 + its vtable offset rather than an address,
+		// which only ScriptConvertFuncPtrFromVoid can turn back into a function pointer
 		struct ItaniumMFP
 		{
 			uintp ptr;
@@ -200,11 +201,11 @@ inline void *ScriptConvertFuncPtrToVoid( FUNCPTR_TYPE pFunc )
 
 		FuncPtrConvertItanium convert;
 		convert.pFunc = pFunc;
-		if ( !( convert.mfp.ptr & 1 ) && convert.mfp.adj == 0 )
+		if ( convert.mfp.adj == 0 )
 		{
-			return reinterpret_cast< void * >( convert.mfp.ptr );
+			return (void *)convert.mfp.ptr;
 		}
-		AssertMsg( 0, "Function pointer must be non-virtual and from the primary base" );
+		AssertMsg( 0, "Function pointer must be from primary vtable" );
 	}
 #else
 #error "Need to implement code to crack non-offset member function pointer case"
@@ -318,7 +319,7 @@ inline FUNCPTR_TYPE ScriptConvertFuncPtrFromVoid( void *p )
 		};
 
 		FuncPtrConvertItanium convert;
-		convert.mfp.ptr = reinterpret_cast< uintp >( p );
+		convert.mfp.ptr = (uintp)p;
 		convert.mfp.adj = 0;
 		return convert.pFunc;
 	}
@@ -366,6 +367,15 @@ inline FUNCPTR_TYPE ScriptConvertFuncPtrFromVoid( void *p )
 #define	SCRIPT_BINDING_ARGS_13 pArguments[0], pArguments[1], pArguments[2], pArguments[3], pArguments[4], pArguments[5], pArguments[6], pArguments[7], pArguments[8], pArguments[9], pArguments[10], pArguments[11], pArguments[12]
 #define	SCRIPT_BINDING_ARGS_14 pArguments[0], pArguments[1], pArguments[2], pArguments[3], pArguments[4], pArguments[5], pArguments[6], pArguments[7], pArguments[8], pArguments[9], pArguments[10], pArguments[11], pArguments[12], pArguments[13]
 
+template <typename T>
+inline void ScriptSetReturnValue( ScriptVariant_t *pReturn, const T &value )
+{
+	// The variant would otherwise point at the returned temporary
+	if constexpr ( ScriptDeduceType( T ) == FIELD_VECTOR )
+		*pReturn = ScriptVariant_t( value, true );
+	else
+		*pReturn = value;
+}
 
 #define DEFINE_SCRIPT_BINDINGS(N) \
 	template <typename FUNC_TYPE, typename FUNCTION_RETTYPE FUNC_TEMPLATE_FUNC_PARAMS_##N> \
@@ -382,9 +392,7 @@ inline FUNCPTR_TYPE ScriptConvertFuncPtrFromVoid( void *p )
 			{ \
 				return false; \
 			} \
-			*pReturn = ((FUNC_TYPE)pFunction)( SCRIPT_BINDING_ARGS_##N ); \
-			if ( pReturn->m_type == FIELD_VECTOR ) \
-				pReturn->m_pVector = new Vector(*pReturn->m_pVector); \
+			ScriptSetReturnValue( pReturn, ((FUNC_TYPE)pFunction)( SCRIPT_BINDING_ARGS_##N ) ); \
  			return true; \
  		} \
 	}; \
@@ -422,9 +430,7 @@ inline FUNCPTR_TYPE ScriptConvertFuncPtrFromVoid( void *p )
 			{ \
 				return false; \
 			} \
-			*pReturn = (((OBJECT_TYPE_PTR)(pContext))->*ScriptConvertFuncPtrFromVoid<FUNC_TYPE>(pFunction))( SCRIPT_BINDING_ARGS_##N ); \
-			if ( pReturn->m_type == FIELD_VECTOR ) \
-				pReturn->m_pVector = new Vector(*pReturn->m_pVector); \
+			ScriptSetReturnValue( pReturn, (((OBJECT_TYPE_PTR)(pContext))->*ScriptConvertFuncPtrFromVoid<FUNC_TYPE>(pFunction))( SCRIPT_BINDING_ARGS_##N ) ); \
  			return true; \
  		} \
 	}; \

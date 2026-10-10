@@ -12,8 +12,8 @@
 
 #include <assert.h>
 #include <string.h>
+#include "utlvectormemory.h"
 
-#include "tier1/utlleanvector.h"
 
 //-----------------------------------------------------------------------------
 // The CUtlStack class:
@@ -24,21 +24,18 @@
 // by index (they should *never* maintain pointers to elements in the stack).
 //-----------------------------------------------------------------------------
 
-template< class T, class M = CUtlLeanVector< T > > 
+template< class T, class M = CUtlVectorMemory_Growable< T > > 
 class CUtlStack
 {
 public:
 	// constructor, destructor
 	CUtlStack( int growSize = 0, int initSize = 0 );
-	CUtlStack( const CUtlStack<T, M> &copyFrom );
-	CUtlStack( CUtlStack<T, M> &&moveFrom );
 	~CUtlStack();
 
-	CUtlStack<T, M> &operator=( const CUtlStack<T, M> &copyFrom ) { return CopyFrom( copyFrom ); }
-	CUtlStack<T, M> &operator=( CUtlStack<T, M> &&moveFrom ) { return MoveFrom( Move( moveFrom ) ); }
-	CUtlStack<T, M> &CopyFrom( const CUtlStack<T, M> &from );
-	CUtlStack<T, M> &MoveFrom( CUtlStack<T, M> &&from );
-	void Swap( CUtlStack<T, M> &that );
+	CUtlStack( const CUtlStack<T, M> &from ) = delete;
+	CUtlStack<T, M> &operator=( const CUtlStack<T, M> &from ) = delete;
+
+	void CopyFrom( const CUtlStack<T, M> &from );
 
 	// element access
 	T& operator[]( int i );
@@ -91,7 +88,7 @@ private:
 	int m_Size;
 
 	// For easier access to the elements through the debugger
-	// T* m_pElements;
+	T* m_pElements;
 };
 
 
@@ -102,7 +99,7 @@ private:
 template< class T, class M >
 inline void CUtlStack<T,M>::ResetDbgInfo()
 {
-	// m_pElements = m_Memory.Base();
+	m_pElements = m_Memory.Base();
 }
 
 //-----------------------------------------------------------------------------
@@ -117,20 +114,6 @@ CUtlStack<T,M>::CUtlStack( int growSize, int initSize )	:
 }
 
 template< class T, class M >
-CUtlStack<T,M>::CUtlStack( const CUtlStack<T, M> &copyFrom ) :
-	m_Size( 0 )
-{
-	CopyFrom( copyFrom );
-}
-
-template< class T, class M >
-CUtlStack<T,M>::CUtlStack( CUtlStack<T, M> &&moveFrom ) :
-	m_Size( 0 )
-{
-	MoveFrom( Move( moveFrom ) );
-}
-
-template< class T, class M >
 CUtlStack<T,M>::~CUtlStack()
 {
 	Purge();
@@ -142,39 +125,14 @@ CUtlStack<T,M>::~CUtlStack()
 //-----------------------------------------------------------------------------
 
 template< class T, class M >
-CUtlStack<T, M> &CUtlStack<T,M>::CopyFrom( const CUtlStack<T, M> &from )
+void CUtlStack<T,M>::CopyFrom( const CUtlStack<T, M> &from )
 {
-	if ( this == &from )
-		return *this;
-
 	Purge();
 	EnsureCapacity( from.Count() );
 	for ( int i = 0; i < from.Count(); i++ )
 	{
 		Push( from[i] );
 	}
-
-	return *this;
-}
-
-template< class T, class M >
-CUtlStack<T, M> &CUtlStack<T,M>::MoveFrom( CUtlStack<T, M> &&from )
-{
-	if ( this == &from )
-		return *this;
-
-	Swap( from );
-
-	return *this;
-}
-
-template< class T, class M >
-void CUtlStack<T,M>::Swap( CUtlStack<T, M> &that )
-{
-	m_Memory.Swap( that.m_Memory );
-	V_swap( m_Size, that.m_Size );
-	ResetDbgInfo();
-	that.ResetDbgInfo();
 }
 
 //-----------------------------------------------------------------------------

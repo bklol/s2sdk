@@ -1,6 +1,6 @@
 //===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose:
+// Purpose: 
 //
 //===========================================================================//
 
@@ -12,7 +12,7 @@
 
 #include "tier0/platform.h"
 #include "tier0/platwindow.h"
-#include "appframework/iappsystem.h"
+#include "appframework/IAppSystem.h"
 #include "inputsystem/InputEnums.h"
 #include "inputsystem/ButtonCode.h"
 #include "inputsystem/AnalogCode.h"
@@ -33,7 +33,7 @@ enum InputStandardCursor_t
 {
 	INPUT_CURSOR_NONE	= 0,
 	INPUT_CURSOR_ARROW,
-	INPUT_CURSOR_IBEAM,
+	INPUT_CURSOR_IBEAM,   
 	INPUT_CURSOR_HOURGLASS,
 	INPUT_CURSOR_CROSSHAIR,
 	INPUT_CURSOR_WAITARROW,
@@ -51,11 +51,6 @@ enum InputStandardCursor_t
 
 
 ///-----------------------------------------------------------------------------
-///-----------------------------------------------------------------------------
-typedef bool ( *InputSDLEventHookFn_t )( const void *pSDLEvent );
-
-
-///-----------------------------------------------------------------------------
 /// Main interface for input. This is a low-level interface, creating an
 /// OS-independent queue of low-level input events which were sampled since
 /// the last call to PollInputState. It also contains facilities for cursor
@@ -64,10 +59,12 @@ typedef bool ( *InputSDLEventHookFn_t )( const void *pSDLEvent );
 abstract_class IInputSystem : public IAppSystem
 {
 public:
-	virtual void AttachToWindow( void *hWnd ) = 0;
-	virtual void DetachFromWindow( void *hWnd ) = 0;
+	/// Attach, detach input system from a particular window
+	/// This window should be the root window for the application
+	virtual void AttachToWindow( void* hWnd ) = 0;
+	virtual void DetachFromWindow( void* hWnd ) = 0;
 
-	/// Enables/disables input. PollInputState will not update current
+	/// Enables/disables input. PollInputState will not update current 
 	/// button/analog states when it is called if the system is disabled.
 	virtual void EnableInput( bool bEnable ) = 0;
 
@@ -75,23 +72,25 @@ public:
 	/// Peek/Dispatch messages if this is disabled
 	virtual void EnableMessagePump( bool bEnable ) = 0;
 
-	virtual void PollInputState( bool bUnknown ) = 0;
+	/// Polls the current input state
+	// AMNOTE: bPumpEvents pumps and processes the pending SDL events first
+	virtual void PollInputState( bool bPumpEvents ) = 0;
 
 	/// Gets the time of the last polling in ms
 	virtual int GetPollTick() const = 0;
 
-	/// Plat_FloatTime() of the last device sample
-	virtual double GetPollTime() const = 0;
-
-	/// Is any button currently down?
-	virtual bool IsAnyButtonDown() const = 0;
+	// AMNOTE: Plat_FloatTime() of the last SampleDevices call, copied into every new InputEvent_t
+	virtual double unk101() const = 0;
+	// AMNOTE: Returns true if any button is down
+	virtual bool unk102() const = 0;
 
 	/// Is a button down? "Buttons" are binary-state input devices (mouse buttons, keyboard keys)
 	virtual bool IsButtonDown( ButtonCode_t code ) const = 0;
 
-	virtual bool WasButtonPressed( ButtonCode_t code ) const = 0;
-	virtual bool WasButtonDoubleClicked( ButtonCode_t code ) const = 0;
-	virtual bool WasButtonReleased( ButtonCode_t code ) const = 0;
+	// AMNOTE: Was the button pressed, double clicked or released since the last poll
+	virtual bool unk201( ButtonCode_t code ) const = 0;
+	virtual bool unk202( ButtonCode_t code ) const = 0;
+	virtual bool unk203( ButtonCode_t code ) const = 0;
 
 	/// Returns the tick at which the button was pressed and released
 	virtual int GetButtonPressedTick( ButtonCode_t code ) const = 0;
@@ -107,8 +106,8 @@ public:
 
 	/// Returns the input events since the last poll
 	virtual int GetEventCount() const = 0;
-	virtual const InputEvent_t *GetEventData() const = 0;
-	virtual const CUtlVector< InputEvent_t > *GetEvents() const = 0;
+	virtual const InputEvent_t* GetEventData( ) const = 0;
+	virtual const CUtlVector< InputEvent_t > &GetEvents() const = 0;
 
 	/// Posts a user-defined event into the event queue; this is expected
 	/// to be called in overridden wndprocs connected to the root panel.
@@ -126,15 +125,16 @@ public:
 	/// Sample the joystick and append events to the input queue
 	virtual void SampleDevices( void ) = 0;
 
-	/// Force-feedback, both are no-ops
 	virtual void SetRumble( float fLeftMotor, float fRightMotor, int userId = INVALID_USER_ID ) = 0;
 	virtual void StopRumble( int userId = INVALID_USER_ID ) = 0;
 
 	/// Resets the input state
 	virtual void ResetInputState() = 0;
 
-	virtual void QueueResetInputState() = 0;
+	// AMNOTE: Requests an input state reset that is applied on the next PollInputState
+	virtual void unk301() = 0;
 
+	/// Convert back + forth between ButtonCode/AnalogCode + strings
 	virtual const char *CodeToString( ButtonCode_t code ) const = 0;
 	virtual const char *CodeToString( AnalogCode_t code ) const = 0;
 	virtual ButtonCode_t StringToButtonCode( const char *pString ) const = 0;
@@ -150,124 +150,114 @@ public:
 	/// How many times have we called PollInputState?
 	virtual int GetPollCount() const = 0;
 
+	/// Gets and sets the cursor position, relative to hWnd if it's set
 	virtual void GetCursorPosition( float *pX, float *pY, PlatWindow_t hWnd ) = 0;
 	virtual void SetCursorPosition( float x, float y, PlatWindow_t hWnd ) = 0;
 
-	/// Is the window attached through AttachToWindow?
-	virtual bool IsAttachedToWindow( PlatWindow_t hWnd ) const = 0;
+	virtual bool IsWindowAttached( PlatWindow_t hWnd ) const = 0;
 
-	/// Returns the cursor loaded for a well-known cursor icon
+	// AMNOTE: Returns the cursor loaded for id, which SetStandardCursor doesn't change
+	virtual InputCursorHandle_t unk401( InputStandardCursor_t id ) = 0;
+
+	/// Gets and overrides the cursor used for one of the well-known cursor icons
 	virtual InputCursorHandle_t GetStandardCursor( InputStandardCursor_t id ) = 0;
+	virtual void SetStandardCursor( InputStandardCursor_t id, InputCursorHandle_t hCursor ) = 0;
 
-	virtual InputCursorHandle_t GetStandardCursorOverride( InputStandardCursor_t id ) = 0;
-	virtual void SetStandardCursorOverride( InputStandardCursor_t id, InputCursorHandle_t hCursor ) = 0;
-
-	virtual bool CanSetCursorScale() const = 0;
-	virtual bool IsAutoCursorScaleEnabled() const = 0;
-	virtual void EnableAutoCursorScale( bool bEnable ) = 0;
-
-	/// A scale of 0.001 or less turns automatic scaling on
-	virtual void SetCursorScale( float flScale ) = 0;
+	// AMNOTE: Cursor size scaling, see cl_cursor_scale and cl_auto_cursor_scale
+	virtual bool unk501() const = 0;
+	virtual bool unk502() const = 0;
+	virtual void unk503( bool bEnable ) = 0;
+	virtual void unk504( float flScale ) = 0;
 
 	/// Loads a cursor defined in a file
 	virtual InputCursorHandle_t LoadCursorFromFile( const char *pFileName, const char *pPathID = NULL ) = 0;
 
-	virtual void ReleaseCursor( InputCursorHandle_t hCursor ) = 0;
+	// AMNOTE: Standard cursor overrides set to hCursor fall back to the loaded standard cursors
+	virtual void unk601( InputCursorHandle_t hCursor ) = 0;
 
-	/// Sets the cursor icon; a NULL cursor hides it
-	virtual void SetCursorIcon( InputCursorHandle_t hCursor, bool bForce = false ) = 0;
-	virtual InputCursorHandle_t GetCursorIcon() const = 0;
+	/// Sets the cursor icon
+	virtual void SetCursorIcon( InputCursorHandle_t hCursor, bool bForce ) = 0;
 
-	/// Master switch for showing the OS cursor
-	virtual void SetCursorVisible( bool bVisible ) = 0;
-	virtual bool IsCursorVisible() const = 0;
+	// AMNOTE: Returns the cursor set by SetCursorIcon
+	virtual InputCursorHandle_t unk701() const = 0;
 
-	virtual bool GetCursorCoordinateBias( PlatWindow_t *pWnd, float *pBiasX, float *pBiasY, float *pScaleX, float *pScaleY ) = 0;
-	virtual bool SetCursorCoordinateBias( PlatWindow_t hWnd, float flBiasX, float flBiasY, float flScaleX, float flScaleY ) = 0;
+	virtual void SetMouseCursorVisible( bool bVisible ) = 0;
+
+	// AMNOTE: Returns the value set by SetMouseCursorVisible
+	virtual bool unk801() const = 0;
+
+	/// Gets and sets the cursor coordinate bias and scale used for hWnd
+	virtual bool GetCoordinateTransform( PlatWindow_t *pWnd, float *pBiasX, float *pBiasY, float *pScaleX, float *pScaleY ) const = 0;
+	virtual void SetCoordinateTransform( PlatWindow_t hWnd, float flBiasX, float flBiasY, float flScaleX, float flScaleY ) = 0;
 
 	/// Mouse capture
 	virtual void EnableMouseCapture( PlatWindow_t hWnd ) = 0;
 	virtual void DisableMouseCapture() = 0;
-	virtual bool IsMouseCaptured() const = 0;
 
-	/// Does one of the attached windows have focus?
-	virtual bool IsWindowFocused() const = 0;
+	// AMNOTE: Returns true while a window has mouse capture
+	virtual bool unk901() const = 0;
 
-	/// Returns the name of an InputEventType_t value
-	virtual const char *InputEventTypeToString( int nType ) const = 0;
-
-	/// Is the application active?
+	virtual bool HasMouseFocus() const = 0;
+	virtual const char *GetInputEventName( InputEventType_t nEventType ) const = 0;
 	virtual bool IsAppActive() const = 0;
-
-	/// Is at least one joystick connected?
-	virtual bool HasJoysticks() const = 0;
-
-	virtual void StartWindowDrag( void *hWnd ) = 0;
-
-	/// Confines the cursor to the window; NULL releases it
+	virtual bool IsXBoxControllerConnected() const = 0;
+	virtual void StartDraggingWindow( void* hWnd ) = 0;
 	virtual void SetCursorClip( PlatWindow_t hWnd ) = 0;
-
-	virtual void unk074( bool bEnable ) = 0;
-
-	virtual void unk075( uint32 nFlags, bool bSet ) = 0;
-
-	/// Relative mouse mode on all attached windows
+	virtual void EnablePowerManagement( bool bEnable ) = 0;
+	virtual void EnableSystemCommands( uint32 nFlags, bool bEnable ) = 0;
 	virtual void SetRelativeMouseMode( bool bEnable ) = 0;
-	virtual bool GetRelativeMouseMode() const = 0;
 
-	/// Prints the SDL and OS cursor, capture and clip state
-	virtual void PrintCursorState() = 0;
+	// AMNOTE: Returns the value set by SetRelativeMouseMode
+	virtual bool unk1001() const = 0;
 
-	/// Converts a key event to the character it types, or 0
-	virtual char KeyEventToChar( const InputEvent_t &event ) = 0;
+	virtual void DebugSpew() = 0;
+	virtual char GetASCIICharacterForButtonPressed( const InputEvent_t &event ) const = 0;
+	virtual uint32 ButtonCodeToSDLKey( ButtonCode_t code ) const = 0;
+	virtual ButtonCode_t SDLKeyToButtonCode( uint32 nSDLKey ) const = 0;
 
-	/// Convert back + forth between SDL key codes + button codes
-	virtual int ButtonCodeToKeyCode( ButtonCode_t code ) const = 0;
-	virtual ButtonCode_t KeyCodeToButtonCode( int nKeyCode ) const = 0;
+	// AMNOTE: SDL scancode helpers: scancode count, ButtonCode_t to and from scancode, SDL_GetScancodeName, SDL_GetScancodeFromName
+	virtual int unk1101() const = 0;
+	virtual int unk1102( ButtonCode_t code ) const = 0;
+	virtual ButtonCode_t unk1103( int nScancode ) const = 0;
+	virtual const char *unk1104( int nScancode ) const = 0;
+	virtual int unk1105( const char *pName ) const = 0;
 
-	virtual int GetScanCodeCount() const = 0;
+	virtual const char *CodeToLocalKeyNameUTF8( ButtonCode_t code ) const = 0;
 
-	/// Convert back + forth between scan codes + button codes
-	virtual int ButtonCodeToScanCode( ButtonCode_t code ) const = 0;
-	virtual ButtonCode_t ScanCodeToButtonCode( int nScanCode ) const = 0;
-
-	/// Convert back + forth between scan codes + their SDL names
-	virtual const char *ScanCodeToString( int nScanCode ) const = 0;
-	virtual int StringToScanCode( const char *pString ) const = 0;
-
-	virtual const char *ButtonCodeToDisplayString( ButtonCode_t code ) const = 0;
-	virtual ButtonCode_t DisplayStringToButtonCode( const char *pString ) const = 0;
-
-	virtual void RefreshButtonCodeDisplayStrings() = 0;
+	// AMNOTE: StringToButtonCode that also accepts the names from CodeToLocalKeyNameUTF8
+	virtual ButtonCode_t unk1201( const char *pString ) const = 0;
+	// AMNOTE: Sets the SDL scancode names to the localized Valve_ButtonCodeName_ strings
+	virtual void unk1202() = 0;
 
 	virtual bool GetButtonCodeIsScanCode() const = 0;
-	virtual void SetButtonCodeIsScanCode( bool bScanCode ) = 0;
+	virtual void SetButtonCodeIsScanCode( bool bIsScanCode ) = 0;
 
-	/// Recomputes the automatic cursor scale
-	virtual void UpdateCursorScale() = 0;
+	// AMNOTE: Recomputes the automatic cursor scale
+	virtual void unk1301() = 0;
 
-	/// IME (text input) support
 	virtual bool IsIMEAllowed() const = 0;
 	virtual void SetIMEAllowed( bool bAllowed ) = 0;
-	virtual void SetIMETextInputRect( int x, int y, int w, int h ) = 0;
-	virtual void ResetIME() = 0;
-	virtual void CreateIMEWindow() = 0;
+	virtual void SetIMETextLocation( int x, int y, int nWidth, int nHeight ) = 0;
+	virtual void DismissIME() = 0;
 
-	virtual void PostButtonPressedEvent( PlatWindow_t hWnd, int nType, int nTick, ButtonCode_t code, int nData2, bool bDoubleClick, uint64 nUnk ) = 0;
-	virtual void PostButtonReleasedEvent( PlatWindow_t hWnd, int nType, int nTick, ButtonCode_t code, int nData2, uint64 nUnk ) = 0;
+	virtual void unk1401() = 0;
 
-#ifdef _WIN32
-	virtual void unk100( void *p ) = 0;
-	virtual void unk101( void *p ) = 0;
+	/// Posts a button press/release event to the queue and updates the button state
+	virtual void PostButtonPressedEvent( PlatWindow_t hWnd, InputEventType_t nType, int nTick, ButtonCode_t code, int nModifiers, bool bDoubleClick, uint64 nSDLTimestamp ) = 0;
+	virtual void PostButtonReleasedEvent( PlatWindow_t hWnd, InputEventType_t nType, int nTick, ButtonCode_t code, int nModifiers, uint64 nSDLTimestamp ) = 0;
+
+#ifdef PLATFORM_WINDOWS
+	// AMNOTE: Window message hooks, called before the input system handles a message; returning true consumes it
+	virtual void unk1501( bool ( *pfnHook )( void *hWnd, uint32 nMsg, uintp wParam, intp lParam ) ) = 0;
+	virtual void unk1502( bool ( *pfnHook )( void *hWnd, uint32 nMsg, uintp wParam, intp lParam ) ) = 0;
 #endif
 
-	virtual void AddSDLEventHook( InputSDLEventHookFn_t pfnHook ) = 0;
-	virtual void RemoveSDLEventHook( InputSDLEventHookFn_t pfnHook ) = 0;
+	// AMNOTE: SDL event hooks, called before the input system handles an event; returning true consumes it
+	virtual void unk1503( bool ( *pfnHook )( void *pSDLEvent ) ) = 0;
+	virtual void unk1504( bool ( *pfnHook )( void *pSDLEvent ) ) = 0;
 
-	virtual double SDLTimestampToFloatTime( uint64 nTimestamp ) = 0;
-
-	inline const char *ButtonCodeToString( ButtonCode_t code ) const { return CodeToString( code ); }
-	inline const char *AnalogCodeToString( AnalogCode_t code ) const { return CodeToString( code ); }
+	// AMNOTE: Converts an SDL event timestamp in nanoseconds to Plat_FloatTime() time
+	virtual double unk1505( uint64 nSDLTimestamp ) const = 0;
 };
 
 DECLARE_TIER2_INTERFACE( IInputSystem, g_pInputSystem );

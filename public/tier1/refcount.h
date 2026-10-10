@@ -148,8 +148,8 @@ public:
 	operator bool()											{ return !BaseClass::operator!(); }
 
 	void SafeRelease()										{ if ( BaseClass::m_pObject ) BaseClass::m_pObject->Release(); BaseClass::m_pObject = 0; }
-	void AssignAddRef( T *pFrom )							{ if (pFrom) pFrom->AddRef(); SafeRelease(); BaseClass::m_pObject = pFrom; }
-	void AddRefAssignTo( T *&pTo )							{ if ( BaseClass::m_pObject ) BaseClass::m_pObject->AddRef(); ::SafeRelease( pTo ); pTo = BaseClass::m_pObject; }
+	void AssignAddRef( T *pFrom )							{ SafeRelease(); if (pFrom) pFrom->AddRef(); BaseClass::m_pObject = pFrom; }
+	void AddRefAssignTo( T *&pTo )							{ ::SafeRelease( pTo ); if ( BaseClass::m_pObject ) BaseClass::m_pObject->AddRef(); pTo = BaseClass::m_pObject; }
 };
 
 
@@ -173,16 +173,12 @@ public:
 
 //-----------------------------------------------------------------------------
 // Purpose:	Actual reference counting implementation. Pulled out to reduce
-//			code bloat. Non-polymorphic; the owning CRefCounted* performs the
-//			self-delete based on k_bSelfDelete.
+//			code bloat.
 //-----------------------------------------------------------------------------
 
 template <typename CRefThreading = CRefMT>
 class CRefCountServiceBase
 {
-public:
-	static const bool k_bSelfDelete = true;
-
 protected:
 	CRefCountServiceBase()
 	  : m_iRefs( 1 )
@@ -208,179 +204,90 @@ private:
 	int m_iRefs;
 };
 
-template <typename CRefThreading = CRefMT>
-class CRefCountServiceNoDeleteBase : public CRefCountServiceBase< CRefThreading >
-{
-public:
-	static const bool k_bSelfDelete = false;
-};
-
 class CRefCountServiceNull
 {
-public:
-	static const bool k_bSelfDelete = false;
-
 protected:
 	static int DoAddRef() { return 1; }
 	static int DoRelease() { return 1; }
 };
 
-template <typename CRefThreading = CRefMT>
-class NO_VTABLE CRefCountServiceDestruct
-{
-public:
-	static const bool k_bSelfDelete = false;
-
-protected:
-	CRefCountServiceDestruct()
-		: m_iRefs( 1 )
-	{
-	}
-
-	virtual ~CRefCountServiceDestruct()
-	{
-	}
-
-	int GetRefCount() const
-	{
-		return m_iRefs;
-	}
-
-	int DoAddRef()
-	{
-		return CRefThreading::Increment( &m_iRefs );
-	}
-
-	int DoRelease()
-	{
-		int result = CRefThreading::Decrement( &m_iRefs );
-		if ( result )
-			return result;
-		this->~CRefCountServiceDestruct();
-		return 0;
-	}
-
-private:
-	int m_iRefs;
-};
-
-
-typedef CRefCountServiceBase<CRefST>			CRefCountServiceST;
-typedef CRefCountServiceNoDeleteBase<CRefST>	CRefCountServiceNoDeleteST;
-
-typedef CRefCountServiceBase<CRefMT>			CRefCountServiceMT;
-typedef CRefCountServiceNoDeleteBase<CRefMT>	CRefCountServiceNoDeleteMT;
+typedef CRefCountServiceBase<CRefST>	CRefCountServiceST;
+typedef CRefCountServiceBase<CRefMT>	CRefCountServiceMT;
 
 // Default to threadsafe
-typedef CRefCountServiceNoDeleteMT			CRefCountServiceNoDelete;
-typedef CRefCountServiceMT					CRefCountService;
+typedef CRefCountServiceMT				CRefCountService;
 
 //-----------------------------------------------------------------------------
 // Purpose:	Base classes to implement reference counting
 //-----------------------------------------------------------------------------
 
-template < class REFCOUNT_SERVICE = CRefCountService >
+template < class REFCOUNT_SERVICE = CRefCountService > 
 class NO_VTABLE CRefCounted : public REFCOUNT_SERVICE
 {
 public:
 	virtual ~CRefCounted()	{}
 	int AddRef() 			{ return REFCOUNT_SERVICE::DoAddRef(); }
-	int Release()
-	{
-		int nRefCount = REFCOUNT_SERVICE::DoRelease();
-		if ( !nRefCount && REFCOUNT_SERVICE::k_bSelfDelete )
-			delete this;
-		return nRefCount;
-	}
+	int Release()			{ int nRefs = REFCOUNT_SERVICE::DoRelease(); if ( !nRefs ) delete this; return nRefs; }
 };
 
 //-------------------------------------
 
-template < class BASE1, class REFCOUNT_SERVICE = CRefCountService >
+template < class BASE1, class REFCOUNT_SERVICE = CRefCountService > 
 class NO_VTABLE CRefCounted1 : public BASE1,
 							   public REFCOUNT_SERVICE
 {
 public:
 	virtual ~CRefCounted1()	{}
 	int AddRef() 			{ return REFCOUNT_SERVICE::DoAddRef(); }
-	int Release()
-	{
-		int nRefCount = REFCOUNT_SERVICE::DoRelease();
-		if ( !nRefCount && REFCOUNT_SERVICE::k_bSelfDelete )
-			delete this;
-		return nRefCount;
-	}
+	int Release()			{ int nRefs = REFCOUNT_SERVICE::DoRelease(); if ( !nRefs ) delete this; return nRefs; }
 };
 
 //-------------------------------------
 
-template < class BASE1, class BASE2, class REFCOUNT_SERVICE = CRefCountService >
+template < class BASE1, class BASE2, class REFCOUNT_SERVICE = CRefCountService > 
 class NO_VTABLE CRefCounted2 : public BASE1, public BASE2,
 							   public REFCOUNT_SERVICE
 {
 public:
 	virtual ~CRefCounted2()	{}
 	int AddRef() 			{ return REFCOUNT_SERVICE::DoAddRef(); }
-	int Release()
-	{
-		int nRefCount = REFCOUNT_SERVICE::DoRelease();
-		if ( !nRefCount && REFCOUNT_SERVICE::k_bSelfDelete )
-			delete this;
-		return nRefCount;
-	}
+	int Release()			{ int nRefs = REFCOUNT_SERVICE::DoRelease(); if ( !nRefs ) delete this; return nRefs; }
 };
 
 //-------------------------------------
 
-template < class BASE1, class BASE2, class BASE3, class REFCOUNT_SERVICE = CRefCountService >
+template < class BASE1, class BASE2, class BASE3, class REFCOUNT_SERVICE = CRefCountService > 
 class NO_VTABLE CRefCounted3 : public BASE1, public BASE2, public BASE3,
 							   public REFCOUNT_SERVICE
 {
+public:
 	virtual ~CRefCounted3()	{}
 	int AddRef() 			{ return REFCOUNT_SERVICE::DoAddRef(); }
-	int Release()
-	{
-		int nRefCount = REFCOUNT_SERVICE::DoRelease();
-		if ( !nRefCount && REFCOUNT_SERVICE::k_bSelfDelete )
-			delete this;
-		return nRefCount;
-	}
+	int Release()			{ int nRefs = REFCOUNT_SERVICE::DoRelease(); if ( !nRefs ) delete this; return nRefs; }
 };
 
 //-------------------------------------
 
-template < class BASE1, class BASE2, class BASE3, class BASE4, class REFCOUNT_SERVICE = CRefCountService >
+template < class BASE1, class BASE2, class BASE3, class BASE4, class REFCOUNT_SERVICE = CRefCountService > 
 class NO_VTABLE CRefCounted4 : public BASE1, public BASE2, public BASE3, public BASE4,
 							   public REFCOUNT_SERVICE
 {
 public:
 	virtual ~CRefCounted4()	{}
 	int AddRef() 			{ return REFCOUNT_SERVICE::DoAddRef(); }
-	int Release()
-	{
-		int nRefCount = REFCOUNT_SERVICE::DoRelease();
-		if ( !nRefCount && REFCOUNT_SERVICE::k_bSelfDelete )
-			delete this;
-		return nRefCount;
-	}
+	int Release()			{ int nRefs = REFCOUNT_SERVICE::DoRelease(); if ( !nRefs ) delete this; return nRefs; }
 };
 
 //-------------------------------------
 
-template < class BASE1, class BASE2, class BASE3, class BASE4, class BASE5, class REFCOUNT_SERVICE = CRefCountService >
+template < class BASE1, class BASE2, class BASE3, class BASE4, class BASE5, class REFCOUNT_SERVICE = CRefCountService > 
 class NO_VTABLE CRefCounted5 : public BASE1, public BASE2, public BASE3, public BASE4, public BASE5,
 							   public REFCOUNT_SERVICE
 {
 public:
 	virtual ~CRefCounted5()	{}
 	int AddRef() 			{ return REFCOUNT_SERVICE::DoAddRef(); }
-	int Release()
-	{
-		int nRefCount = REFCOUNT_SERVICE::DoRelease();
-		if ( !nRefCount && REFCOUNT_SERVICE::k_bSelfDelete )
-			delete this;
-		return nRefCount;
-	}
+	int Release()			{ int nRefs = REFCOUNT_SERVICE::DoRelease(); if ( !nRefs ) delete this; return nRefs; }
 };
 
 //-----------------------------------------------------------------------------
@@ -388,11 +295,8 @@ public:
 //			referencing problems
 //-----------------------------------------------------------------------------
 
-#if defined( __clang__ )
-template <class BASE_REFCOUNTED, int FINAL_REFS, const char *pszName>
-#else
-template <class BASE_REFCOUNTED, int FINAL_REFS = 0, const char *pszName = (const char *)NULL>
-#endif
+#if 0
+template <class BASE_REFCOUNTED, int FINAL_REFS = 0, const char *pszName = NULL>
 class CRefDebug : public BASE_REFCOUNTED
 {
 public:
@@ -423,6 +327,7 @@ public:
 	}
 #endif
 };
+#endif
 
 //-----------------------------------------------------------------------------
 

@@ -41,8 +41,14 @@
 
 #include "tier0/platform.h"
 #include "tier1/refcount.h"
-#include "tier1/utlenvelope.h"
+#include "tier1/strtools.h"
 #include <typeinfo>
+
+#if defined( _CPPRTTI ) || defined( __GXX_RTTI )
+#define FUNC_ARG_TYPE_NAME( type ) typeid( type ).name()
+#else
+#define FUNC_ARG_TYPE_NAME( type ) "?"
+#endif
 
 
 //-----------------------------------------------------------------------------
@@ -67,8 +73,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_0			
 #define	FUNC_TEMPLATE_FUNC_PARAMS_0			
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_0	
-#define	FUNC_VALIDATION_STRING_0			Q_snprintf( pString, nBufLen, "method( void )" );
-#define FUNC_SEPARATOR_0
+#define	FUNC_VALIDATION_STRING_0			Q_snprintf( pString, (int)nBufLen, "method( void )" );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_1		typename ARG_TYPE_1
 #define	FUNC_TEMPLATE_ARG_PARAMS_1			, typename ARG_TYPE_1
@@ -85,8 +90,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_1			, arg1
 #define	FUNC_TEMPLATE_FUNC_PARAMS_1			, typename FUNC_ARG_TYPE_1
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_1	FUNC_ARG_TYPE_1
-#define	FUNC_VALIDATION_STRING_1			Q_snprintf( pString, nBufLen, "method( %s )", typeid( ARG_TYPE_1 ).name() );	
-#define FUNC_SEPARATOR_1					,
+#define	FUNC_VALIDATION_STRING_1			Q_snprintf( pString, (int)nBufLen, "method( %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ) );	
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_2		typename ARG_TYPE_1, typename ARG_TYPE_2
 #define	FUNC_TEMPLATE_ARG_PARAMS_2			, typename ARG_TYPE_1, typename ARG_TYPE_2
@@ -103,8 +107,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_2			, arg1, arg2
 #define	FUNC_TEMPLATE_FUNC_PARAMS_2			, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_2	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2
-#define	FUNC_VALIDATION_STRING_2			Q_snprintf( pString, nBufLen, "method( %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name() );
-#define FUNC_SEPARATOR_2					,
+#define	FUNC_VALIDATION_STRING_2			Q_snprintf( pString, (int)nBufLen, "method( %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_3		typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3
 #define	FUNC_TEMPLATE_ARG_PARAMS_3			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3
@@ -121,8 +124,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_3			, arg1, arg2, arg3
 #define	FUNC_TEMPLATE_FUNC_PARAMS_3			, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_3	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3
-#define	FUNC_VALIDATION_STRING_3			Q_snprintf( pString, nBufLen, "method( %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name() );
-#define FUNC_SEPARATOR_3					,
+#define	FUNC_VALIDATION_STRING_3			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_4		typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4
 #define	FUNC_TEMPLATE_ARG_PARAMS_4			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4
@@ -139,8 +141,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_4			, arg1, arg2, arg3, arg4
 #define	FUNC_TEMPLATE_FUNC_PARAMS_4			, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_4	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4
-#define	FUNC_VALIDATION_STRING_4			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name() );
-#define FUNC_SEPARATOR_4					,
+#define	FUNC_VALIDATION_STRING_4			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_5		typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5
 #define	FUNC_TEMPLATE_ARG_PARAMS_5			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5
@@ -157,9 +158,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_5			, arg1, arg2, arg3, arg4, arg5
 #define	FUNC_TEMPLATE_FUNC_PARAMS_5			, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_5	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5
-#define	FUNC_VALIDATION_STRING_5			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name() );
-#define FUNC_SEPARATOR_5					,
-
+#define	FUNC_VALIDATION_STRING_5			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_6		typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6
 #define	FUNC_TEMPLATE_ARG_PARAMS_6			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6
@@ -176,8 +175,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_6			, arg1, arg2, arg3, arg4, arg5, arg6
 #define	FUNC_TEMPLATE_FUNC_PARAMS_6			, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5, typename	FUNC_ARG_TYPE_6
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_6	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5, FUNC_ARG_TYPE_6
-#define	FUNC_VALIDATION_STRING_6			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name(), typeid( ARG_TYPE_6 ).name() );
-#define FUNC_SEPARATOR_6					,
+#define	FUNC_VALIDATION_STRING_6			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_6 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_7		typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7
 #define	FUNC_TEMPLATE_ARG_PARAMS_7			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7
@@ -194,8 +192,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_7			, arg1, arg2, arg3, arg4, arg5, arg6, arg7
 #define	FUNC_TEMPLATE_FUNC_PARAMS_7			, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5, typename	FUNC_ARG_TYPE_6, typename FUNC_ARG_TYPE_7
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_7	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5, FUNC_ARG_TYPE_6, FUNC_ARG_TYPE_7
-#define	FUNC_VALIDATION_STRING_7			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name(), typeid( ARG_TYPE_6 ).name(), typeid( ARG_TYPE_7 ).name() );
-#define FUNC_SEPARATOR_7					,
+#define	FUNC_VALIDATION_STRING_7			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_6 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_7 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_8		typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8
 #define	FUNC_TEMPLATE_ARG_PARAMS_8			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8
@@ -212,8 +209,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_8			, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8
 #define	FUNC_TEMPLATE_FUNC_PARAMS_8			, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5, typename	FUNC_ARG_TYPE_6, typename FUNC_ARG_TYPE_7, typename FUNC_ARG_TYPE_8
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_8	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5, FUNC_ARG_TYPE_6, FUNC_ARG_TYPE_7, FUNC_ARG_TYPE_8
-#define	FUNC_VALIDATION_STRING_8			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name(), typeid( ARG_TYPE_6 ).name(), typeid( ARG_TYPE_7 ).name(), typeid( ARG_TYPE_8 ).name() );
-#define FUNC_SEPARATOR_8					,
+#define	FUNC_VALIDATION_STRING_8			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_6 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_7 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_8 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_9		typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9
 #define	FUNC_TEMPLATE_ARG_PARAMS_9			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9
@@ -230,8 +226,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_9			, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9
 #define	FUNC_TEMPLATE_FUNC_PARAMS_9			, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5, typename	FUNC_ARG_TYPE_6, typename FUNC_ARG_TYPE_7, typename FUNC_ARG_TYPE_8, typename	FUNC_ARG_TYPE_9
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_9	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5, FUNC_ARG_TYPE_6, FUNC_ARG_TYPE_7, FUNC_ARG_TYPE_8, FUNC_ARG_TYPE_9
-#define	FUNC_VALIDATION_STRING_9			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name(), typeid( ARG_TYPE_6 ).name(), typeid( ARG_TYPE_7 ).name(), typeid( ARG_TYPE_8 ).name(), typeid( ARG_TYPE_9 ).name() );
-#define FUNC_SEPARATOR_9					,
+#define	FUNC_VALIDATION_STRING_9			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_6 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_7 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_8 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_9 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_10	typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10
 #define	FUNC_TEMPLATE_ARG_PARAMS_10			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10
@@ -248,8 +243,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_10			, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10
 #define	FUNC_TEMPLATE_FUNC_PARAMS_10		, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5, typename	FUNC_ARG_TYPE_6, typename FUNC_ARG_TYPE_7, typename FUNC_ARG_TYPE_8, typename	FUNC_ARG_TYPE_9, typename FUNC_ARG_TYPE_10
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_10	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5, FUNC_ARG_TYPE_6, FUNC_ARG_TYPE_7, FUNC_ARG_TYPE_8, FUNC_ARG_TYPE_9, FUNC_ARG_TYPE_10
-#define	FUNC_VALIDATION_STRING_10			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name(), typeid( ARG_TYPE_6 ).name(), typeid( ARG_TYPE_7 ).name(), typeid( ARG_TYPE_8 ).name(), typeid( ARG_TYPE_9 ).name(), typeid( ARG_TYPE_10 ).name() );
-#define FUNC_SEPARATOR_10					,
+#define	FUNC_VALIDATION_STRING_10			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_6 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_7 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_8 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_9 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_10 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_11	typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11
 #define	FUNC_TEMPLATE_ARG_PARAMS_11			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11
@@ -266,8 +260,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_11			, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11
 #define	FUNC_TEMPLATE_FUNC_PARAMS_11		, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5, typename	FUNC_ARG_TYPE_6, typename FUNC_ARG_TYPE_7, typename FUNC_ARG_TYPE_8, typename	FUNC_ARG_TYPE_9, typename FUNC_ARG_TYPE_10, typename FUNC_ARG_TYPE_11
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_11	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5, FUNC_ARG_TYPE_6, FUNC_ARG_TYPE_7, FUNC_ARG_TYPE_8, FUNC_ARG_TYPE_9, FUNC_ARG_TYPE_10, FUNC_ARG_TYPE_11
-#define	FUNC_VALIDATION_STRING_11			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name(), typeid( ARG_TYPE_6 ).name(), typeid( ARG_TYPE_7 ).name(), typeid( ARG_TYPE_8 ).name(), typeid( ARG_TYPE_9 ).name(), typeid( ARG_TYPE_10 ).name(), typeid( ARG_TYPE_11 ).name() );
-#define FUNC_SEPARATOR_11					,
+#define	FUNC_VALIDATION_STRING_11			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_6 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_7 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_8 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_9 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_10 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_11 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_12	typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12
 #define	FUNC_TEMPLATE_ARG_PARAMS_12			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12
@@ -284,8 +277,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_12			, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12
 #define	FUNC_TEMPLATE_FUNC_PARAMS_12		, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5, typename	FUNC_ARG_TYPE_6, typename FUNC_ARG_TYPE_7, typename FUNC_ARG_TYPE_8, typename	FUNC_ARG_TYPE_9, typename FUNC_ARG_TYPE_10, typename FUNC_ARG_TYPE_11, typename FUNC_ARG_TYPE_12
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_12	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5, FUNC_ARG_TYPE_6, FUNC_ARG_TYPE_7, FUNC_ARG_TYPE_8, FUNC_ARG_TYPE_9, FUNC_ARG_TYPE_10, FUNC_ARG_TYPE_11, FUNC_ARG_TYPE_12
-#define	FUNC_VALIDATION_STRING_12			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name(), typeid( ARG_TYPE_6 ).name(), typeid( ARG_TYPE_7 ).name(), typeid( ARG_TYPE_8 ).name(), typeid( ARG_TYPE_9 ).name(), typeid( ARG_TYPE_10 ).name(), typeid( ARG_TYPE_11 ).name(), typeid( ARG_TYPE_12 ).name() );
-#define FUNC_SEPARATOR_12					,
+#define	FUNC_VALIDATION_STRING_12			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_6 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_7 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_8 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_9 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_10 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_11 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_12 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_13	typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13
 #define	FUNC_TEMPLATE_ARG_PARAMS_13			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13
@@ -302,8 +294,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_13			, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13
 #define	FUNC_TEMPLATE_FUNC_PARAMS_13		, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5, typename	FUNC_ARG_TYPE_6, typename FUNC_ARG_TYPE_7, typename FUNC_ARG_TYPE_8, typename	FUNC_ARG_TYPE_9, typename FUNC_ARG_TYPE_10, typename FUNC_ARG_TYPE_11, typename FUNC_ARG_TYPE_12, typename FUNC_ARG_TYPE_13
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_13	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5, FUNC_ARG_TYPE_6, FUNC_ARG_TYPE_7, FUNC_ARG_TYPE_8, FUNC_ARG_TYPE_9, FUNC_ARG_TYPE_10, FUNC_ARG_TYPE_11, FUNC_ARG_TYPE_12, FUNC_ARG_TYPE_13
-#define	FUNC_VALIDATION_STRING_13			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name(), typeid( ARG_TYPE_6 ).name(), typeid( ARG_TYPE_7 ).name(), typeid( ARG_TYPE_8 ).name(), typeid( ARG_TYPE_9 ).name(), typeid( ARG_TYPE_10 ).name(), typeid( ARG_TYPE_11 ).name(), typeid( ARG_TYPE_12 ).name(), typeid( ARG_TYPE_13 ).name() );
-#define FUNC_SEPARATOR_13					,
+#define	FUNC_VALIDATION_STRING_13			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_6 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_7 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_8 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_9 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_10 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_11 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_12 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_13 ) );
 
 #define	FUNC_SOLO_TEMPLATE_ARG_PARAMS_14	typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13, typename ARG_TYPE_14
 #define	FUNC_TEMPLATE_ARG_PARAMS_14			, typename ARG_TYPE_1, typename ARG_TYPE_2, typename	ARG_TYPE_3,	typename ARG_TYPE_4, typename ARG_TYPE_5, typename ARG_TYPE_6, typename ARG_TYPE_7, typename ARG_TYPE_8, typename ARG_TYPE_9, typename ARG_TYPE_10, typename ARG_TYPE_11, typename ARG_TYPE_12, typename ARG_TYPE_13, typename ARG_TYPE_14
@@ -320,8 +311,7 @@
 #define	FUNC_FUNCTOR_CALL_ARGS_14			, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14
 #define	FUNC_TEMPLATE_FUNC_PARAMS_14		, typename FUNC_ARG_TYPE_1, typename	FUNC_ARG_TYPE_2, typename FUNC_ARG_TYPE_3, typename	FUNC_ARG_TYPE_4, typename FUNC_ARG_TYPE_5, typename	FUNC_ARG_TYPE_6, typename FUNC_ARG_TYPE_7, typename FUNC_ARG_TYPE_8, typename	FUNC_ARG_TYPE_9, typename FUNC_ARG_TYPE_10, typename FUNC_ARG_TYPE_11, typename FUNC_ARG_TYPE_12, typename FUNC_ARG_TYPE_13, typename FUNC_ARG_TYPE_14
 #define	FUNC_BASE_TEMPLATE_FUNC_PARAMS_14	FUNC_ARG_TYPE_1, FUNC_ARG_TYPE_2, FUNC_ARG_TYPE_3,	FUNC_ARG_TYPE_4, FUNC_ARG_TYPE_5, FUNC_ARG_TYPE_6, FUNC_ARG_TYPE_7, FUNC_ARG_TYPE_8, FUNC_ARG_TYPE_9, FUNC_ARG_TYPE_10, FUNC_ARG_TYPE_11, FUNC_ARG_TYPE_12, FUNC_ARG_TYPE_13, FUNC_ARG_TYPE_14
-#define	FUNC_VALIDATION_STRING_14			Q_snprintf( pString, nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", typeid( ARG_TYPE_1 ).name(), typeid( ARG_TYPE_2 ).name(), typeid( ARG_TYPE_3 ).name(), typeid( ARG_TYPE_4 ).name(), typeid( ARG_TYPE_5 ).name(), typeid( ARG_TYPE_6 ).name(), typeid( ARG_TYPE_7 ).name(), typeid( ARG_TYPE_8 ).name(), typeid( ARG_TYPE_9 ).name(), typeid( ARG_TYPE_10 ).name(), typeid( ARG_TYPE_11 ).name(), typeid( ARG_TYPE_12 ).name(), typeid( ARG_TYPE_13 ).name(), typeid( ARG_TYPE_14 ).name() );
-#define FUNC_SEPARATOR_14					,
+#define	FUNC_VALIDATION_STRING_14			Q_snprintf( pString, (int)nBufLen, "method( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s )", FUNC_ARG_TYPE_NAME( ARG_TYPE_1 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_2 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_3 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_4 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_5 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_6 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_7 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_8 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_9 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_10 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_11 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_12 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_13 ), FUNC_ARG_TYPE_NAME( ARG_TYPE_14 ) );
 
 #define FUNC_GENERATE_ALL_BUT0( INNERMACRONAME ) \
 	INNERMACRONAME(1); \
@@ -352,11 +342,15 @@
 abstract_class CFunctor : public IRefCounted
 {
 public:
-	CFunctor() {}
-	virtual ~CFunctor() {}
+	CFunctor()
+	{
+#ifdef DEBUG
+		m_nUserID = 0;
+#endif
+	}
 	virtual void operator()() = 0;
 
-	unsigned m_nUserID{}; // For debugging
+	unsigned m_nUserID; // For debugging
 };
 
 
@@ -387,8 +381,6 @@ public:
 // When calling through a functor, care needs to be taken to not pass objects that might go away. 
 // Since this code determines the type to store in the functor based on the actual arguments,
 // this is achieved by changing the point of call. 
-//
-// See also CUtlEnvelope
 //-----------------------------------------------------------------------------
 // convert a reference to a passable value
 template <typename T>
@@ -467,8 +459,8 @@ public:
 
 protected:
 	CMemberFuncProxyBase( OBJECT_TYPE_PTR pObject, FUNCTION_TYPE pfnProxied )
-	  : m_pfnProxied( pfnProxied ),
-		m_pObject( pObject )
+	  : m_pObject( pObject ),
+		m_pfnProxied( pfnProxied )
 	{
 		MEM_POLICY::OnAcquire(m_pObject);
 	}
@@ -591,7 +583,7 @@ class CFunctorData0 : public CFunctorDataBase
 {
 public:
 	CFunctorData0( ) {}
-	virtual void ComputeValidationString( char *pString, size_t nBufLen_ ) const { int nBufLen = (int)nBufLen_; FUNC_VALIDATION_STRING_0 }
+	virtual void ComputeValidationString( char *pString, size_t nBufLen ) const { FUNC_VALIDATION_STRING_0 }
 };
 
 FUNC_GENERATE_ALL_BUT0( DEFINE_FUNCTOR_DATA_TEMPLATE );
@@ -627,7 +619,7 @@ public:
 		ValidateFunctorData( pFunctorDataBase );
 		m_pfnProxied( );
 	}
-	virtual void ComputeValidationString( char *pString, size_t nBufLen_ ) const { int nBufLen = (int)nBufLen_; FUNC_VALIDATION_STRING_0 }
+	virtual void ComputeValidationString( char *pString, size_t nBufLen ) const { FUNC_VALIDATION_STRING_0 }
 	virtual bool IsEqual( CFunctorCallback *pSrc ) const 
 	{ 
 		if ( Q_stricmp( GetImplClassName(), pSrc->GetImplClassName() ) )
@@ -635,7 +627,7 @@ public:
 		return m_pfnProxied == static_cast< CFunctorCallback0* >( pSrc )->m_pfnProxied; 
 	}
 	virtual const char *GetImplClassName() const { return "CFunctorCallback0"; }
-	virtual const void *GetTarget() const { return ( void * )m_pfnProxied; }
+	virtual const void *GetTarget() const { return reinterpret_cast<void *>(m_pfnProxied); }
 private:
 	Callback_t m_pfnProxied; 
 };

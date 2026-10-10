@@ -5,29 +5,29 @@
 #pragma once
 #endif
 
-#include <tier0/utlstring.h>
+#include <tier1/utlstring.h>
 #include <tier1/bitbuf.h>
 #include <inetchannel.h>
-#include "color.h"
+#include "Color.h"
 
 class CNetMessage;
 
 abstract_class IProtobufBinding
 {
 public:
-	virtual const char *GetName() const = 0;
-	virtual int GetSize() const = 0;
+	virtual const char *GetName() = 0;
+	virtual int GetSize() = 0;
 
-	virtual const char *ToString( CNetMessage *pData, CUtlString &sResult ) const = 0;
+	virtual const char *ToString(const void *pData, CUtlString &sResult) = 0;
 
-	virtual const char *GetGroup() const = 0;
-	virtual Color GetGroupColor() const = 0;
-	virtual NetChannelBufType_t GetBufType() const = 0;
+	virtual const char *GetGroup() = 0;
+	virtual Color GetGroupColor() = 0;
+	virtual NetChannelBufType_t GetBufType() = 0;
 
-	virtual CNetMessage *AllocateMessage() const = 0;
+	virtual CNetMessage *AllocateMessage() = 0;
 
-	virtual bool OkToRedispatch() const = 0;
-	virtual bool IsParent() const = 0;
+	virtual bool OkToRedispatch() = 0;
+	virtual bool unk001() = 0;
 };
 
 #endif /* PROTOBUFBINDING_H */

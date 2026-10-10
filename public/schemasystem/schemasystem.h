@@ -6,12 +6,12 @@
 #endif
 
 #include "tier0/threadtools.h"
-#include "tier0/utlstring.h"
 #include "tier1/convar.h"
-#include "tier1/utlstringmap.h"
+#include "tier1/utlstring.h"
+#include "tier1/UtlStringMap.h"
 #include "tier1/utltshash.h"
 #include "tier1/utlvector.h"
-#include "appframework/iappsystem.h"
+#include "appframework/IAppSystem.h"
 #include "schemasystem/schematypes.h"
 
 class CBufferString;
@@ -31,8 +31,6 @@ enum SchemaHierarchyIteration_t
 	SCHEMA_ITER_SINGLE_PARENT,
 	SCHEMA_ITER_MULTI_PARENT
 };
-
-typedef void (*CompleteModuleRegistrationCallbackFn_t)(void*);
 
 abstract_class ISchemaSystemTypeScope
 {
@@ -60,7 +58,7 @@ public:
 
 	virtual SchemaMetaInfoHandle_t<CSchemaType_Atomic>			FindType_Atomic( int nAtomicID ) = 0;
 	virtual SchemaMetaInfoHandle_t<CSchemaType_Atomic_T>		FindType_Atomic_T( int nAtomicID, CSchemaType* pTemplateType ) = 0;
-	virtual SchemaMetaInfoHandle_t<CSchemaType_Atomic_CollectionOfT> FindType_Atomic_CollectionOfT( int nAtomicID, CSchemaType* pTemplateType, uint64 nFixedBufferCount, SchemaCollectionManipulatorFn_t manipulator ) = 0;
+	virtual SchemaMetaInfoHandle_t<CSchemaType_Atomic_CollectionOfT> FindType_Atomic_CollectionOfT( int nAtomicID, CSchemaType* pTemplateType, SchemaCollectionManipulatorFn_t manipulator ) = 0;
 	virtual SchemaMetaInfoHandle_t<CSchemaType_Atomic_TT> 		FindType_Atomic_TT( int nAtomicID, CSchemaType* pTemplateType, CSchemaType* pTemplateType2 ) = 0;
 	virtual SchemaMetaInfoHandle_t<CSchemaType_Atomic_I> 		FindType_Atomic_I( int nAtomicID, int nInteger ) = 0;
 	
@@ -172,13 +170,7 @@ class CSchemaSystem : public ISchemaSystem
 		uintp m_minAddr;
 		uintp m_maxAddr;
 	};
-	
-	struct CompleteModuleRegistrationCallback_t
-	{
-		CompleteModuleRegistrationCallbackFn_t m_pfnCallback;
-		void* m_pArgument;
-	};
-	
+
 public:
 	CUtlVector<ResourceManifestDesc_t*> m_ResourceManifestDescs;
 	int m_nNumConnections;
@@ -210,8 +202,6 @@ public:
 	int m_nIgnored;
 	int m_nRedundant;
 	size_t m_nIgnoredBytes;
-	
-	CUtlVector<CompleteModuleRegistrationCallback_t> m_CompleteModuleRegistrationCallbacks;
 };
 
 #endif // SCHEMASYSTEM_H

@@ -1,24 +1,12 @@
-# IDEs
-.idea
-.vs
-.vscode
-.PVS-Studio
+# Build directories
+/build/
+/vs/
+/linuxbuild/
+cmake-build-*/
+.cmake/
 
-# AI agents
-.aider/
-.claude/
-.codex/
-.continue/
-.cursor/
-.gemini/
-.windsurf/
-
-# CMake
-CMakeUserPresets.json
-
-# Build files. Must be published in Releases
-/.cache
-/build*
-/cmake-build*
-/compile_commands.json
-/.clangd
+# IDEs and tools
+.idea/
+.vs/
+.kdev4/
+.ccls-cache/

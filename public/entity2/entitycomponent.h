@@ -6,21 +6,20 @@
 #endif
 
 #include "tier0/platform.h"
-#include "tier0/utlstring.h"
-#include "tier0/utlstringtoken.h"
 #include "tier1/utlsymbollarge.h"
-#include "tier1/smartptr.h"
+#include "tier1/utlstring.h"
 #include "datamap.h"
-#include "kv3lib/kv3transfer_constants.h"
 #include "schemasystem/schematypes.h"
-#include "entitytypes.h"
 
-class CEntityInstance;
 class CEntityIdentity;
+class CEntityInstance;
 class CEntityComponentHelper;
-struct ScriptClassDesc_t;
+class CKV3TransferLoadContext;
+class CKV3TransferSaveContext;
+class CNetworkSerializerClassInfo;
 struct ComponentUnserializerClassInfo_t;
-struct EntOutput_t;
+
+FORWARD_DECLARE_HANDLE( HSCRIPT );
 
 struct ComponentUnserializerKeyNamesChunk_t
 {
@@ -61,22 +60,34 @@ struct ComponentUnserializerClassInfo_t
 	uint16 m_nClassInfoPtrCount;
 };
 
-schema struct EntComponentInfo_t
+struct EntComponentInfo_t
 {
-	DECLARE_SCHEMA_DATA_CLASS( EntComponentInfo_t );
-
 	const char* m_pName;
 	const char* m_pCPPClassname;
 	const char* m_pNetworkDataReferencedDescription;
 	const char* m_pNetworkDataReferencedPtrPropDescription;
 	int m_nRuntimeIndex;
 	uint m_nFlags;
-	noschema ComponentUnserializerClassInfo_t m_componentUnserializerClassInfo;
-	noschema ScriptClassDesc_t* m_pScriptDesc;
+	ComponentUnserializerClassInfo_t m_componentUnserializerClassInfo;
+	void* m_pScriptDesc;
 	CEntityComponentHelper* m_pBaseClassComponentHelper;
 };
 
-schema class CEntityComponentHelper
+struct EntOutput_t
+{
+	typedef void* (*GetOutputOwnerFn_t)( CEntityInstance* pEntity );
+
+	const char* m_pName;
+	uint32 m_nFlags;
+
+	// Returns the object that holds the output, the entity itself when null
+	GetOutputOwnerFn_t m_pfnGetOutputOwner;
+
+	// Offset of the CEntityIOOutput in its owner, 0x7FFFFFFF when there is none
+	uint32 m_nOutputOffset;
+};
+
+class CEntityComponentHelper
 {
 public:
 	virtual SchemaMetaInfoHandle_t<CSchemaClassInfo> Schema_DynamicBinding() = 0;
@@ -87,26 +98,42 @@ public:
 	virtual void Free( CEntityIdentity* pEntity, void* pComponent ) = 0;
 
 public:
-	EntityComponentHelperFlags_t m_flags;
+	uint m_flags;
 	EntComponentInfo_t* m_pInfo;
 	int m_nPriority;
 	CEntityComponentHelper* m_pNext;
 };
 
-class CKV3TransferLoadContext;
-class CKV3TransferSaveContext;
-
-schema class CEntityComponent
+class CEntityComponent
 {
 public:
-	// TODO(@Wend4r): Implement schemacompiler2 & kv3lib stuff
-	virtual SchemaMetaInfoHandle_t< CSchemaClassInfo > Schema_DynamicBinding() = 0;
-	virtual datamap_t *GetDataDescMap() = 0;
-	virtual SchemaMetaInfoHandle_t< CSchemaClassInfo > GetSchemaBinding() = 0;
-	CLASS_USES_KV3TRANSFER_VIRTUAL( CEntityComponent );
+	virtual SchemaMetaInfoHandle_t<CSchemaClassInfo> Schema_DynamicBinding() = 0;
+	virtual datamap_t* GetDataDescMap() = 0;
+	virtual CNetworkSerializerClassInfo* GetNetworkSerializerInfo() = 0;
+	virtual void KV3TransferSave( CKV3TransferSaveContext* pContext ) const = 0;
+	virtual void KV3TransferLoad( CKV3TransferLoadContext* pContext ) = 0;
+	virtual CEntityComponentHelper* GetComponentHelper() = 0;
+};
 
-	virtual CEntityComponentHelper *GetComponentHelper() = 0;
-	virtual const char *GetComponentName() = 0;
+class CScriptComponent : public CEntityComponent
+{
+public:
+	virtual const char* GetComponentName() = 0;
+
+public:
+	HSCRIPT m_hScope;
+
+	// AMNOTE: The storage of a CUtlVectorUltraConservative<HSCRIPT*>, an int count followed by the elements,
+	// but null rather than CUtlVectorUltraConservative's static block when empty
+	void* m_FuncHandles;
+
+	int m_flags;
+	CEntityInstance* m_pOwner;
+
+	// AMNOTE: The storage of a CUtlVectorUltraConservative<CEntityIOOutput>, null when empty like m_FuncHandles
+	void* m_Outputs;
+
+	CUtlSymbolLarge m_scriptClassName;
 };
 
 #endif // ENTITYCOMPONENT_H

@@ -150,7 +150,7 @@ CPolyhedron *GetTempPolyhedron( unsigned short iVertices, unsigned short iLines,
 }
 
 
-Vector CPolyhedron::Center( void ) const
+Vector CPolyhedron::Center( void )
 {
 	if( iVertexCount == 0 )
 		return vec3_origin;
@@ -177,7 +177,6 @@ Vector CPolyhedron::Center( void ) const
 	return ((vAABBMin + vAABBMax) * 0.5f);
 }
 
-extern "C" {
 enum PolyhedronPointPlanarity
 {
 	POINT_DEAD,
@@ -245,7 +244,8 @@ struct GeneratePolyhedronFromPlanes_UnorderedPointLL //an unordered collection o
 	GeneratePolyhedronFromPlanes_UnorderedPointLL *pNext;
 	GeneratePolyhedronFromPlanes_UnorderedPointLL *pPrev;
 };
-}
+
+
 
 
 CPolyhedron *ClipPolyhedron( const CPolyhedron *pExistingPolyhedron, const float *pOutwardFacingPlanes, int iPlaneCount, float fOnPlaneEpsilon, bool bUseTemporaryMemory )
@@ -318,10 +318,10 @@ CPolyhedron *ClipPolyhedron( const CPolyhedron *pExistingPolyhedron, const float
 														pExistingPolyhedron->iPolygonCount );
 		}
 
-		memcpy( ( void * )pReturn->pVertices, pExistingPolyhedron->pVertices, sizeof( Vector ) * pReturn->iVertexCount );
-		memcpy( ( void * )pReturn->pLines, pExistingPolyhedron->pLines, sizeof( Polyhedron_IndexedLine_t ) * pReturn->iLineCount );
-		memcpy( ( void * )pReturn->pIndices, pExistingPolyhedron->pIndices, sizeof( Polyhedron_IndexedLineReference_t ) * pReturn->iIndexCount );
-		memcpy( ( void * )pReturn->pPolygons, pExistingPolyhedron->pPolygons, sizeof( Polyhedron_IndexedPolygon_t ) * pReturn->iPolygonCount );
+		memcpy( (void *)pReturn->pVertices, pExistingPolyhedron->pVertices, sizeof( Vector ) * pReturn->iVertexCount );
+		memcpy( pReturn->pLines, pExistingPolyhedron->pLines, sizeof( Polyhedron_IndexedLine_t ) * pReturn->iLineCount );
+		memcpy( pReturn->pIndices, pExistingPolyhedron->pIndices, sizeof( Polyhedron_IndexedLineReference_t ) * pReturn->iIndexCount );
+		memcpy( (void *)pReturn->pPolygons, pExistingPolyhedron->pPolygons, sizeof( Polyhedron_IndexedPolygon_t ) * pReturn->iPolygonCount );
 
 		return pReturn;
 	}

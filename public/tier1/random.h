@@ -35,8 +35,10 @@ public:
 	virtual float	RandomFloatExp( float flMinVal = 0.0f, float flMaxVal = 1.0f, float flExponent = 1.0f ) = 0;
 };
 
+
 //-----------------------------------------------------------------------------
-// The uniform generator tier0 actually exports, templated on the locking policy.
+// The standard generator of uniformly distributed random numbers, which tier0
+// exports for CThreadNullMutex, CAtomicMutex and CThreadNullVerificationMutex
 //-----------------------------------------------------------------------------
 template < class TMutex >
 class DLL_CLASS_IMPORT CUniformRandomStreamImpl
@@ -45,8 +47,10 @@ public:
 	CUniformRandomStreamImpl();
 	explicit CUniformRandomStreamImpl( int iSeed );
 
+	// Sets the seed of the random number generator
 	void	SetSeed( int iSeed );
 
+	// Generates random numbers
 	float	RandomFloat( float flMinVal = 0.0f, float flMaxVal = 1.0f );
 	int		RandomInt( int iMinVal, int iMaxVal );
 	float	RandomFloatExp( float flMinVal = 0.0f, float flMaxVal = 1.0f, float flExponent = 1.0f );
@@ -64,23 +68,14 @@ private:
 	TMutex m_mutex;
 };
 
-//-----------------------------------------------------------------------------
-// The standard generator of uniformly distributed random numbers
-//-----------------------------------------------------------------------------
-using CUniformRandomStream = CUniformRandomStreamImpl< CThreadNullMutex >;
-
-//-----------------------------------------------------------------------------
-// A generator of gaussian distributed random numbers
-//-----------------------------------------------------------------------------
-using CGaussianRandomStream = CUniformRandomStreamImpl< CThreadFastMutex >;
 
 //-----------------------------------------------------------------------------
 // A couple of convenience functions to access the library's global uniform stream
 //-----------------------------------------------------------------------------
-DLL_IMPORT void		RandomSeed( int iSeed );
+DLL_IMPORT void	RandomSeed( int iSeed );
 DLL_IMPORT float	RandomFloat( float flMinVal = 0.0f, float flMaxVal = 1.0f );
 DLL_IMPORT float	RandomFloatExp( float flMinVal = 0.0f, float flMaxVal = 1.0f, float flExponent = 1.0f );
-DLL_IMPORT int		RandomInt( int iMinVal, int iMaxVal );
+DLL_IMPORT int	RandomInt( int iMinVal, int iMaxVal );
 DLL_IMPORT float	RandomGaussianFloat( float flMean = 0.0f, float flStdDev = 1.0f );
 
 #ifdef _MSC_VER
@@ -88,3 +83,6 @@ DLL_IMPORT float	RandomGaussianFloat( float flMean = 0.0f, float flStdDev = 1.0f
 #endif
 
 #endif // VSTDLIB_RANDOM_H
+
+
+
