@@ -16,6 +16,9 @@
 namespace GCSDK
 {
 
+// SOID_t::m_type of a player's own caches, the one a SteamID owns
+const uint32 k_SOID_Type_SteamID = 1;
+
 //----------------------------------------------------------------------------
 // Purpose: Owner of a shared object cache, CMsgSOIDOwner on the wire
 //----------------------------------------------------------------------------
