@@ -73,20 +73,20 @@ public:
 	
 	virtual float		GetAvgLoss( int flow ) const = 0;	 // avg packet loss[0..1]
 	virtual float		GetAvgChoke(int flow) const = 0;
-	virtual float		unk101( int flow ) const = 0;
+	virtual float		GetMaxLatency( int flow ) const = 0;
 	virtual float		GetAvgData( int flow ) const = 0;	 // data flow in bytes/sec
 	virtual float		GetAvgPackets( int flow ) const = 0; // avg packets/sec
 	virtual uint64		GetTotalData( int flow ) const = 0;	 // total flow in/out in bytes
 	virtual int			GetTotalPackets( int flow ) const = 0;
 	virtual int			GetSequenceNr( int flow ) const = 0;	// last send seq number
 	virtual float		GetTimeSinceLastReceived( void ) const = 0;	// get time since last recieved packet in seconds
-	virtual void		GetRemoteFramerate( float *pflFrameTime, float *pflFrameTimeStdDeviation, float *pflUnfilteredFrameTime ) const = 0;
+	virtual void		GetRemoteFramerate( float *pflFrameTime = nullptr, float *pflFrameTimeStdDeviation = nullptr, float *pflUnfilteredFrameTime = nullptr ) const = 0;
 
 	virtual float		GetTimeoutSeconds( void ) const = 0;
 	virtual float		GetTimeUntilTimeout( void ) const = 0;
 	
-	// AMNOTE: Returns the value INetChannel::unk211 sets
-	virtual float		unk201() const = 0;
+	// Packets with latency above this threshold, in seconds, are counted as late.
+	virtual float		GetLateLatencyThreshold() const = 0;
 	
 	virtual void		ResetLatencyStats( int channel ) = 0;
 	virtual SNetChannelLatencyStats *GetLatencyStats( int channel ) const = 0;
@@ -96,9 +96,12 @@ public:
 	virtual void		SetNumPredictionErrors( int num ) = 0;
 	virtual void		SetShowNetMessages( bool show ) = 0;
 
-	virtual int			unk301( int flow, int nSeqNr, float *pflLatency = nullptr ) const = 0;
-	virtual int			unk302( int flow, int16 *pOut, int nMaxEntries ) const = 0;
-	virtual void		unk303( int flow, CMsgSource2NetworkFlowQuality *pMsg, bool ) = 0;
+	// Status: 0 received, 1 dropped, 2 out of order, 3 unknown. Latency is in seconds.
+	virtual int			GetPacketStatus( int flow, int nSeqNr, float *pflLatency = nullptr ) const = 0;
+	// Newest first, in milliseconds: -1 dropped, -2 out of order, -3 missing.
+	// Writes at most min(nMaxEntries, 128) entries and returns the count written.
+	virtual int			GetPacketLatencyHistory( int flow, int16 *pOut, int nMaxEntries ) const = 0;
+	virtual void		GetFlowQuality( int flow, CMsgSource2NetworkFlowQuality *pMsg, bool ) = 0;
 };
 
 #endif // INETCHANNELINFO_H

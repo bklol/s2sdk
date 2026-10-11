@@ -112,8 +112,8 @@ public:
 	virtual bool	IsTimedOut( void ) const = 0;
 	virtual void	UpdateLastReceivedTime( void ) = 0;
 
-	// AMNOTE: Latency in seconds above which packets are flagged and counted in the flow stats
-	virtual void	unk211( float ) = 0;
+	// Latency in seconds above which packets are flagged and counted in the flow stats
+	virtual void	SetLateLatencyThreshold( float flThreshold ) = 0;
 	// AMNOTE: Also sets the outgoing flow's loss and choke from the message
 	virtual void	SetRemoteFramerate( const CNetMessagePB<CNETMsg_Tick> *pMsg ) = 0;
 	
@@ -139,8 +139,8 @@ public:
 	virtual void	UninstallMessageFilter( INetworkMessageProcessingPreFilter *pFilter ) = 0;
 	
 	virtual void	PostReceivedNetMessage( CNetMessage *pData ) = 0;
-	// AMNOTE: Same as PostReceivedNetMessage, but adds the message to the front of the queue
-	virtual void	unk311( CNetMessage *pData ) = 0;
+	// Same as PostReceivedNetMessage, but adds the message to the front of the queue
+	virtual void	PrependReceivedNetMessage( CNetMessage *pData ) = 0;
 	virtual void	InsertReplayMessage( InstantReplayMessage_t &msg ) = 0;
 	virtual bool	HasQueuedNetMessages( int nMessageId ) const = 0;
 
@@ -154,10 +154,10 @@ public:
 	virtual EResult	SendMessageRaw( const void *pData, uint32 cbData, int nSendFlags ) = 0;
 	
 	virtual void	NotifyOutboundTick( int nTick ) = 0;
-	// AMNOTE: Returns the queue of received messages that ProcessMessages dispatches
-	virtual void	*unk411() = 0;
-	virtual void	unk412( CNetMessagePB<CNETMsg_Tick> *pMsg ) = 0;
-	virtual void	unk413( CConVar<int> *pQueuedMessageLimit ) = 0;
+	// Returns the engine-owned queue of received messages that ProcessMessages dispatches
+	virtual void	*GetQueuedNetMessages() = 0;
+	virtual void	FillTickNetworkStats( CNetMessagePB<CNETMsg_Tick> *pMsg ) = 0;
+	virtual void	SetQueuedMessageLimitConVar( CConVar<int> *pQueuedMessageLimit ) = 0;
 };
 
 
