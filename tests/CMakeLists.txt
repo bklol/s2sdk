@@ -52,3 +52,12 @@ add_executable(utlsymbollarge_test
 target_link_libraries(utlsymbollarge_test PRIVATE s2sdk::s2sdk)
 target_compile_definitions(utlsymbollarge_test PRIVATE ${S2SDK_OWN_DEFINITIONS})
 target_compile_options(utlsymbollarge_test PRIVATE ${S2SDK_OWN_OPTIONS})
+
+# Sized deletion must return allocations to the same tier0 allocator as new.
+add_executable(memoverride_test
+	"${CMAKE_CURRENT_SOURCE_DIR}/run/memoverride.cpp"
+	"${S2SDK_DIR}/public/tier0/memoverride.cpp"
+)
+target_link_libraries(memoverride_test PRIVATE s2sdk::s2sdk)
+target_compile_definitions(memoverride_test PRIVATE ${S2SDK_OWN_DEFINITIONS})
+target_compile_options(memoverride_test PRIVATE ${S2SDK_OWN_OPTIONS})

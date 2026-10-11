@@ -406,6 +406,11 @@ void __cdecl operator delete( void *pMem ) noexcept
 #endif
 }
 
+void __cdecl operator delete( void *pMem, size_t ) noexcept
+{
+	::operator delete( pMem );
+}
+
 void *__cdecl operator new[] ( size_t nSize )
 {
 	return AllocUnattributed( nSize );
@@ -423,6 +428,11 @@ void __cdecl operator delete[] ( void *pMem ) noexcept
 #else
 	g_pMemAlloc->Free(pMem, g_pszModule, 0 );
 #endif
+}
+
+void __cdecl operator delete[]( void *pMem, size_t ) noexcept
+{
+	::operator delete[]( pMem );
 }
 #endif
 
