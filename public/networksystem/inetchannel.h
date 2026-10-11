@@ -17,6 +17,7 @@
 #include "tier0/bitbuf.h"
 #include "tier0/netadr.h"
 #include "tier0/utldelegate.h"
+#include "tier0/utlqueue.h"
 #include "convar.h"
 #include "network_connection.pb.h"
 
@@ -71,7 +72,8 @@ public:
 
 	virtual void	UpdateMessageStats( int msggroup, int bits, bool ) = 0;
 	
-	virtual void	unk111() = 0;
+	// AMNOTE: Moves the encoding stats collected since the last call into the current incoming frame
+	virtual void	StoreEncodingStatsInFrame() = 0;
 	
 	virtual bool	CanPacket( void ) const = 0;
 	virtual bool	IsOverflowed( void ) const = 0;
