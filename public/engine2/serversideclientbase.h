@@ -218,10 +218,12 @@ public:
 	INetChannel *GetNetChannel() const { return m_pNetChannel; }
 	CNetworkGameServerBase *GetServer() const { return m_pServer; }
 
+	ClientSlotReservation_t GetSlotReservation() const { return m_nSlotReservation; }
 	SignonState_t GetSignonState() const { return m_nSignonState; }
 	bool IsConnected() const { return m_nSignonState >= SIGNONSTATE_CONNECTED; }
 	bool IsSpawned() const { return m_nSignonState >= SIGNONSTATE_NEW; }
 	bool IsActive() const { return m_nSignonState == SIGNONSTATE_FULL; }
+	bool IsFakePlayer() const { return m_bFakePlayer; }
 
 	bool IsHLTV() const { return m_bIsHLTV; }
 	bool IsFullyAuthenticated() const { return m_bFullyAuthenticated; }
