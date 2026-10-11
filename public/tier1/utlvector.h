@@ -612,13 +612,30 @@ template< typename T, class I, class A >
 inline CUtlVectorBase<T, I, A>::CUtlVectorBase( CUtlVectorBase&& src ) :
 	CUtlVectorBase( 0, 0 )
 {
-	Swap( src );
+	*this = std::move( src );
 }
 
 template< typename T, class I, class A >
 inline CUtlVectorBase<T, I, A>& CUtlVectorBase<T, I, A>::operator=( CUtlVectorBase<T, I, A> &&other )
 {
-	Swap( other );
+	if ( this == &other )
+		return *this;
+
+	if constexpr ( std::is_base_of_v<CUtlVectorMemory_Growable<T, I>, A> )
+	{
+		// Inline buffers belong to their original vector and cannot be transferred.
+		if ( !m_Memory.IsExternallyAllocated() && !other.m_Memory.IsExternallyAllocated() )
+		{
+			Swap( other );
+			return *this;
+		}
+	}
+
+	RemoveAll();
+	EnsureCapacity( other.Count() );
+	for ( I i = 0; i < other.Count(); ++i )
+		AddToTail( std::move( other[i] ) );
+	other.RemoveAll();
 	return *this;
 }
 

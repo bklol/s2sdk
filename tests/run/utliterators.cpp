@@ -303,9 +303,79 @@ static void TestDict()
 	CHECK( i == 4 );
 }
 
+struct MoveOnlyValue
+{
+	static int s_nLive;
+	int *m_pValue;
+
+	explicit MoveOnlyValue( int value ) : m_pValue( new int( value ) ) { ++s_nLive; }
+	MoveOnlyValue( const MoveOnlyValue & ) = delete;
+	MoveOnlyValue &operator=( const MoveOnlyValue & ) = delete;
+	MoveOnlyValue( MoveOnlyValue &&other ) noexcept : m_pValue( other.m_pValue )
+	{
+		other.m_pValue = nullptr;
+		++s_nLive;
+	}
+	~MoveOnlyValue() { delete m_pValue; --s_nLive; }
+};
+
+int MoveOnlyValue::s_nLive = 0;
+
+template <typename Container>
+static void TestVectorMoves( int count )
+{
+	{
+		Container destination;
+		destination.AddToTail( MoveOnlyValue( -1 ) );
+		{
+			Container source;
+			source.EnsureCapacity( count );
+			for ( int i = 0; i < count; ++i )
+				source.AddToTail( MoveOnlyValue( i + 10 ) );
+			destination = std::move( source );
+			CHECK( destination.Count() == count );
+			// A move must never leave the destination using the source's inline storage.
+			uintptr_t storage = reinterpret_cast<uintptr_t>( destination.Base() );
+			uintptr_t sourceBegin = reinterpret_cast<uintptr_t>( &source );
+			CHECK( storage < sourceBegin || storage >= sourceBegin + sizeof( source ) );
+		}
+		for ( int i = 0; i < destination.Count(); ++i )
+			CHECK( *destination[i].m_pValue == i + 10 );
+		Container &self = destination;
+		destination = std::move( self );
+		CHECK( destination.Count() == count );
+		Container moved( std::move( destination ) );
+		CHECK( moved.Count() == count );
+		CHECK( destination.Count() == 0 );
+		for ( int i = 0; i < moved.Count(); ++i )
+			CHECK( *moved[i].m_pValue == i + 10 );
+		moved = Container{};
+		CHECK( moved.Count() == 0 );
+	}
+	CHECK( MoveOnlyValue::s_nLive == 0 );
+}
+
+static void TestAllVectorMoves()
+{
+	TestVectorMoves<CUtlVector<MoveOnlyValue>>( 7 );
+	TestVectorMoves<CUtlVectorFixed<MoveOnlyValue, 8>>( 7 );
+	TestVectorMoves<CUtlVectorFixedGrowable<MoveOnlyValue, 8>>( 3 );
+	TestVectorMoves<CUtlVectorFixedGrowable<MoveOnlyValue, 8>>( 17 );
+	TestVectorMoves<CUtlVectorConservative<MoveOnlyValue>>( 7 );
+	TestVectorMoves<CUtlVectorRawAllocator<MoveOnlyValue>>( 7 );
+	TestVectorMoves<CUtlVector<MoveOnlyValue, int, CUtlVectorMemory_Aligned<MoveOnlyValue, 16>>>( 7 );
+
+	CUtlVector<int> source;
+	source.AddToTail( 42 );
+	int *allocation = source.Base();
+	CUtlVector<int> moved( std::move( source ) );
+	CHECK( moved.Base() == allocation && moved[0] == 42 && source.Count() == 0 );
+}
+
 int main()
 {
 	TestVectors();
+	TestAllVectorMoves();
 	TestLinkedLists();
 	TestRBTree();
 	TestOrderedMap();
