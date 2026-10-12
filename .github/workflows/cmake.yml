@@ -45,3 +45,4 @@ jobs:
           LD_LIBRARY_PATH=lib/linux64 build/tests/utlsymbollarge_test
           LD_LIBRARY_PATH=lib/linux64 build/tests/utlleanvector_test
           LD_LIBRARY_PATH=lib/linux64 build/tests/generichash_test
+          LD_LIBRARY_PATH=lib/linux64 build/tests/bufferstring_test

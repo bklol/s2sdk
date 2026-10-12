@@ -79,3 +79,11 @@ add_executable(generichash_test "${CMAKE_CURRENT_SOURCE_DIR}/run/generichash.cpp
 target_link_libraries(generichash_test PRIVATE s2sdk::headers)
 target_compile_definitions(generichash_test PRIVATE ${S2SDK_OWN_DEFINITIONS})
 target_compile_options(generichash_test PRIVATE ${S2SDK_OWN_OPTIONS})
+# Copies and moves CBufferStrings through tier0
+add_executable(bufferstring_test
+	"${CMAKE_CURRENT_SOURCE_DIR}/run/bufferstring.cpp"
+	"${S2SDK_DIR}/public/tier0/memoverride.cpp"
+)
+target_link_libraries(bufferstring_test PRIVATE s2sdk::s2sdk)
+target_compile_definitions(bufferstring_test PRIVATE ${S2SDK_OWN_DEFINITIONS})
+target_compile_options(bufferstring_test PRIVATE ${S2SDK_OWN_OPTIONS})
