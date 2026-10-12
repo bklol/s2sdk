@@ -73,3 +73,9 @@ add_executable(utlleanvector_test
 target_link_libraries(utlleanvector_test PRIVATE s2sdk::s2sdk)
 target_compile_definitions(utlleanvector_test PRIVATE ${S2SDK_OWN_DEFINITIONS})
 target_compile_options(utlleanvector_test PRIVATE ${S2SDK_OWN_OPTIONS})
+
+# Byte hashes must accept unaligned input without changing their results.
+add_executable(generichash_test "${CMAKE_CURRENT_SOURCE_DIR}/run/generichash.cpp")
+target_link_libraries(generichash_test PRIVATE s2sdk::headers)
+target_compile_definitions(generichash_test PRIVATE ${S2SDK_OWN_DEFINITIONS})
+target_compile_options(generichash_test PRIVATE ${S2SDK_OWN_OPTIONS})

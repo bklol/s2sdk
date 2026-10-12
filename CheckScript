@@ -134,3 +134,13 @@ for sdk_target in SdkHelpers.sdk_targets:
   SdkHelpers.configureCxx(builder, binary, sdk)
 
 builder.Add(lvtest)
+
+# Byte hashes must accept unaligned input without changing their results.
+hashtest = builder.ProgramProject('generichash_test')
+hashtest.sources = [os.path.join('tests', 'run', 'generichash.cpp')]
+
+for sdk_target in SdkHelpers.sdk_targets:
+  binary = hashtest.Configure(sdk_target.cxx, 'generichash_test', '{0} - {1}'.format(HL2SDK.tag, sdk_target.cxx.target.arch))
+  SdkHelpers.configureCxx(builder, binary, sdk)
+
+builder.Add(hashtest)
