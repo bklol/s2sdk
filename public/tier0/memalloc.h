@@ -185,7 +185,7 @@ public:
 	virtual void CompactOnFail() = 0;
 
 	// Logs the out of memory message, breaks in the debugger and exits the process
-	virtual void ReportFailedAllocation( int nSize ) = 0;
+	virtual void ReportFailedAllocation( size_t nSize ) = 0;
 
 	// memset's at the pMem location with nSize bytes of specified type, where:
 	// MemoryDebugType_None - would do nothing;
