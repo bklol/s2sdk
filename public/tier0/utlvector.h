@@ -63,9 +63,6 @@ public:
 	CUtlVectorBase( T* pMemory, I allocationCount, I numElements = 0 );
 	~CUtlVectorBase();
 
-	CUtlVectorBase( CUtlVectorBase&& src );
-	CUtlVectorBase<T, I, A>& operator=( CUtlVectorBase<T, I, A> &&other );
-	
 	// Copy the array.
 	CUtlVectorBase<T, I, A>& operator=( const CUtlVectorBase<T, I, A> &other );
 
@@ -243,6 +240,12 @@ class CUtlVector : public CUtlVectorBase< T, I, A >
 public:
 
 	using BaseClass::BaseClass;
+
+	// Moves swap the memory; the other vectors on CUtlVectorBase copy when assigned from an rvalue
+	CUtlVector( CUtlVector &&src )										{ this->Swap( src ); }
+	CUtlVector<T, I, A>& operator=( CUtlVector<T, I, A> &&other )		{ this->Swap( other ); return *this; }
+
+	CUtlVector<T, I, A>& operator=( const CUtlVector<T, I, A> &other ) = default;
 };
 
 //-----------------------------------------------------------------------------
@@ -336,37 +339,6 @@ template< typename T, class I, class A >
 inline CUtlVectorBase<T, I, A>::~CUtlVectorBase()
 {
 	Purge();
-}
-
-template< typename T, class I, class A >
-inline CUtlVectorBase<T, I, A>::CUtlVectorBase( CUtlVectorBase&& src ) :
-	CUtlVectorBase( 0, 0 )
-{
-	*this = std::move( src );
-}
-
-template< typename T, class I, class A >
-inline CUtlVectorBase<T, I, A>& CUtlVectorBase<T, I, A>::operator=( CUtlVectorBase<T, I, A> &&other )
-{
-	if ( this == &other )
-		return *this;
-
-	if constexpr ( std::is_base_of_v<CUtlVectorMemory_Growable<T, I>, A> )
-	{
-		// Inline buffers belong to their original vector and cannot be transferred.
-		if ( !m_Memory.IsExternallyAllocated() && !other.m_Memory.IsExternallyAllocated() )
-		{
-			Swap( other );
-			return *this;
-		}
-	}
-
-	RemoveAll();
-	EnsureCapacity( other.Count() );
-	for ( I i = 0; i < other.Count(); ++i )
-		AddToTail( std::move( other[i] ) );
-	other.RemoveAll();
-	return *this;
 }
 
 template< typename T, class I, class A >
