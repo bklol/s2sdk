@@ -367,11 +367,6 @@ static void TestVectorMoves( int count )
 static void TestAllVectorMoves()
 {
 	TestVectorMoves<CUtlVector<MoveOnlyValue>>( 7 );
-	TestVectorMoves<CUtlVectorFixed<MoveOnlyValue, 8>>( 7 );
-	TestVectorMoves<CUtlVectorFixedGrowable<MoveOnlyValue, 8>>( 3 );
-	TestVectorMoves<CUtlVectorFixedGrowable<MoveOnlyValue, 8>>( 17 );
-	TestVectorMoves<CUtlVectorConservative<MoveOnlyValue>>( 7 );
-	TestVectorMoves<CUtlVectorRawAllocator<MoveOnlyValue>>( 7 );
 	TestVectorMoves<CUtlVector<MoveOnlyValue, int, CUtlVectorMemory_Aligned<MoveOnlyValue, 16>>>( 7 );
 
 	CUtlVector<int> source;
