@@ -202,7 +202,7 @@ public:
 	virtual void				OnAddEntity(CEntityInstance* pEnt, CEntityHandle handle) = 0;
 	virtual void				OnRemoveEntity(CEntityInstance* pEnt, CEntityHandle handle) = 0;
 	virtual WorldGroupId_t		GetSpawnGroupWorldId(SpawnGroupHandle_t hSpawnGroup) = 0;
-	virtual void				SortEntities(int nCount, const EntitySpawnInfo_t* pInfo) = 0;
+	virtual void				SortEntities(int nCount, EntitySpawnInfo_t* pInfo) = 0;
 	virtual void				Spawn(int nCount, const EntitySpawnInfo_t* pInfo) = 0;
 	virtual void				Activate(int nCount, const EntityActivation_t* pActivates, ActivateType_t activateType) = 0;
 	virtual void				PostDataUpdate(int nCount, const PostDataUpdateInfo_t *pInfo) = 0;
@@ -228,6 +228,10 @@ public:
 	}
 
 	inline CKV3Arena* GetEntityKeyValuesAllocator() { return &m_EntityKeyValuesAllocator; }
+
+	// Allocates new entitykv, release it with CEntityKeyValues::Release
+	// pszClassName, pOrigin and pAngles, where given, are set as its classname, origin and angles keys
+	CEntityKeyValues* CreateEntityKeyValues(const char* pszClassName = nullptr, const Vector* pOrigin = nullptr, const QAngle* pAngles = nullptr);
 
 	// Search for an entity class by its C++ name, case-insensitive
 	CEntityClass* FindClassByName(const char* szClassName);

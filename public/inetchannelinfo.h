@@ -81,7 +81,7 @@ public:
 	virtual int			GetTotalPackets( int flow ) const = 0;
 	virtual int			GetSequenceNr( int flow ) const = 0;	// last send seq number
 	virtual float		GetTimeSinceLastReceived( void ) const = 0;	// get time since last recieved packet in seconds
-	virtual void		GetRemoteFramerate( float *pflFrameTime = nullptr, float *pflFrameTimeStdDeviation = nullptr, float *pflUnfilteredFrameTime = nullptr ) const = 0;
+	virtual void		GetRemoteFramerate( float *pflFrameTime, float *pflFrameTimeStdDeviation, float *pflUnfilteredFrameTime ) const = 0;
 
 	virtual float		GetTimeoutSeconds( void ) const = 0;
 	virtual float		GetTimeUntilTimeout( void ) const = 0;
@@ -102,8 +102,11 @@ public:
 	// AMNOTE: Writes the jitter of up to nMaxEntries recent frames, newest first, in 0.1 ms units, or -1 dropped,
 	// -2 out of order, -3 unknown, and returns the count written
 	virtual int			GetFrameJitterHistory( int flow, int16 *pOut, int nMaxEntries ) const = 0;
-	// AMNOTE: Fills pMsg with the flow's quality stats
-	virtual void		GetFlowQuality( int flow, CMsgSource2NetworkFlowQuality *pMsg, bool ) = 0;
+	// Fills pMsg with the flow's quality stats, except the tick and receive margin fields.
+	// AMNOTE: When the bool is set, the outgoing flow gets only the duration, byte and net frame totals and their
+	// percentiles, and the incoming flow only the rest (frame contents, message counts, jitter, ping, message processing
+	// and queue stats)
+	virtual void		GetNetworkFlowQuality( int flow, CMsgSource2NetworkFlowQuality *pMsg, bool ) = 0;
 };
 
 #endif // INETCHANNELINFO_H

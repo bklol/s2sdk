@@ -39,7 +39,7 @@ public:
 
 public:
 	// Allocated on first use
-	ChangeAccessorFieldPathIndexInfo_t* m_pChangeChangeAccessorFieldPathIndexInfo;
+	ChangeAccessorFieldPathIndexInfo_t* m_pChangeAccessorFieldPathIndexInfo;
 
 	// While it is registered, state changes are only marked pending until it fires
 	CEventRegister* m_pTimerEvent;
@@ -50,11 +50,12 @@ public:
 	// A single { 1, 0, 1 } when the bounds touch more than 32 words
 	PVSClusterWord_t m_PVSClusterWords[32];
 
-	CThreadRWLock_FastRead m_unk101;
+	// AMNOTE: Constructed and destroyed with the component, never locked
+	CThreadRWLock_FastRead m_Lock;
 
-	// AMNOTE: Bounds that the transmit check can cull the entity by distance to
-	Vector m_unk102;
-	Vector m_unk103;
+	// AMNOTE: The constructor sets them to an empty box (FLT_MAX mins, -FLT_MAX maxs), nothing else uses them
+	Vector m_vMins;
+	Vector m_vMaxs;
 
 	// FL_EDICT_CHANGED, FL_FULL_EDICT_CHANGED and the FL_EDICT_ALWAYS, FL_EDICT_DONTSEND or FL_EDICT_PVSCHECK transmit state
 	uint32 m_nStateFlags;
@@ -67,7 +68,7 @@ public:
 
 	bool m_bNetworkUpdatesDisabled;
 
-	// Changed offsets one shared change info holds, 48 when negative
+	// Changed offsets one shared change info holds, MAX_CHANGE_OFFSETS when negative
 	int m_nMaxChangedOffsets;
 
 	CEntityInstance* m_pOuter;
@@ -78,9 +79,10 @@ public:
 	// The spawn group whose bounds contain the entity, preferring the entity's own spawn group
 	SpawnGroupHandle_t m_PhysicalSpawnGroupHandle;
 
-	CAtomicMutex m_unk201;
+	// AMNOTE: Held while the transmit state is queried from m_pOuter, when no m_nTransmitStateOwnedCounter owner sets it
+	CAtomicMutex m_TransmitStateMutex;
 	// AMNOTE: Held while the PVS clusters are recomputed
-	CAtomicMutex m_unk202;
+	CAtomicMutex m_PVSClustersMutex;
 
 	CEntityInstancePolymorphicMetadataHelper* m_pPolymorphicMetadataHelper;
 	bool m_bPolymorphicMetadataHelperDirty;

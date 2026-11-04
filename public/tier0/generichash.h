@@ -13,7 +13,6 @@
 #endif
 
 #include <cctype>
-#include <string.h>
 #include <type_traits>
 
 #include "platform.h"
@@ -95,10 +94,10 @@ constexpr uint32 HashInt( const int n )
 
 inline uint32 Hash4( const void *pKey )
 {
-	const uint8 *p = (const uint8 *)pKey;
+	const uint32 *p = (const uint32 *)pKey;
 	uint32		even = 0, odd = 0, n = 0;
 
-	memcpy( &n, p, sizeof( n ) );
+	n     = *p;
 	even  = GenericHash::detail::kRandVals[n & 0xff];
 	odd   = GenericHash::detail::kRandVals[((n >> 8) & 0xff)];
 
@@ -112,10 +111,10 @@ inline uint32 Hash4( const void *pKey )
 
 inline uint32 Hash8( const void *pKey )
 {
-	const uint8 *p = (const uint8 *)pKey;
+	const uint32 *p = (const uint32 *)pKey;
 	uint32		even = 0, odd = 0, n = 0;
 
-	memcpy( &n, p, sizeof( n ) );
+	n     = *p;
 	even  = GenericHash::detail::kRandVals[n & 0xff];
 	odd   = GenericHash::detail::kRandVals[((n >> 8) & 0xff)];
 
@@ -124,7 +123,7 @@ inline uint32 Hash8( const void *pKey )
 	even  = GenericHash::detail::kRandVals[odd ^ ((n >> 8) & 0xff)];
 	odd   = GenericHash::detail::kRandVals[even ^ (n & 0xff)];
 
-	memcpy( &n, p + sizeof( n ), sizeof( n ) );
+	n     = *(p + 1);
 	even  = GenericHash::detail::kRandVals[odd ^ (n >> 24)];
 	odd   = GenericHash::detail::kRandVals[even ^ ((n >> 16) & 0xff)];
 	even  = GenericHash::detail::kRandVals[odd ^ ((n >> 8) & 0xff)];
@@ -135,10 +134,10 @@ inline uint32 Hash8( const void *pKey )
 
 inline uint32 Hash12( const void *pKey )
 {
-	const uint8 *p = (const uint8 *)pKey;
+	const uint32 *p = (const uint32 *)pKey;
 	uint32		even = 0, odd = 0, n = 0;
 
-	memcpy( &n, p, sizeof( n ) );
+	n     = *p;
 	even  = GenericHash::detail::kRandVals[n & 0xff];
 	odd   = GenericHash::detail::kRandVals[((n >> 8) & 0xff)];
 
@@ -147,13 +146,13 @@ inline uint32 Hash12( const void *pKey )
 	even  = GenericHash::detail::kRandVals[odd ^ ((n >> 8) & 0xff)];
 	odd   = GenericHash::detail::kRandVals[even ^ (n & 0xff)];
 
-	memcpy( &n, p + sizeof( n ), sizeof( n ) );
+	n     = *(p + 1);
 	even  = GenericHash::detail::kRandVals[odd ^ (n >> 24)];
 	odd   = GenericHash::detail::kRandVals[even ^ ((n >> 16) & 0xff)];
 	even  = GenericHash::detail::kRandVals[odd ^ ((n >> 8) & 0xff)];
 	odd   = GenericHash::detail::kRandVals[even ^ (n & 0xff)];
 
-	memcpy( &n, p + 2 * sizeof( n ), sizeof( n ) );
+	n     = *(p + 2);
 	even  = GenericHash::detail::kRandVals[odd ^ (n >> 24)];
 	odd   = GenericHash::detail::kRandVals[even ^ ((n >> 16) & 0xff)];
 	even  = GenericHash::detail::kRandVals[odd ^ ((n >> 8) & 0xff)];
@@ -164,10 +163,10 @@ inline uint32 Hash12( const void *pKey )
 
 inline uint32 Hash16( const void *pKey )
 {
-	const uint8 *p = (const uint8 *)pKey;
+	const uint32 *p = (const uint32 *)pKey;
 	uint32		even = 0, odd = 0, n = 0;
 
-	memcpy( &n, p, sizeof( n ) );
+	n     = *p;
 	even  = GenericHash::detail::kRandVals[n & 0xff];
 	odd   = GenericHash::detail::kRandVals[((n >> 8) & 0xff)];
 
@@ -176,19 +175,19 @@ inline uint32 Hash16( const void *pKey )
 	even  = GenericHash::detail::kRandVals[odd ^ ((n >> 8) & 0xff)];
 	odd   = GenericHash::detail::kRandVals[even ^ (n & 0xff)];
 
-	memcpy( &n, p + sizeof( n ), sizeof( n ) );
+	n     = *(p + 1);
 	even  = GenericHash::detail::kRandVals[odd ^ (n >> 24)];
 	odd   = GenericHash::detail::kRandVals[even ^ ((n >> 16) & 0xff)];
 	even  = GenericHash::detail::kRandVals[odd ^ ((n >> 8) & 0xff)];
 	odd   = GenericHash::detail::kRandVals[even ^ (n & 0xff)];
 
-	memcpy( &n, p + 2 * sizeof( n ), sizeof( n ) );
+	n     = *(p + 2);
 	even  = GenericHash::detail::kRandVals[odd ^ (n >> 24)];
 	odd   = GenericHash::detail::kRandVals[even ^ ((n >> 16) & 0xff)];
 	even  = GenericHash::detail::kRandVals[odd ^ ((n >> 8) & 0xff)];
 	odd   = GenericHash::detail::kRandVals[even ^ (n & 0xff)];
 
-	memcpy( &n, p + 3 * sizeof( n ), sizeof( n ) );
+	n     = *(p + 3);
 	even  = GenericHash::detail::kRandVals[odd ^ (n >> 24)];
 	odd   = GenericHash::detail::kRandVals[even ^ ((n >> 16) & 0xff)];
 	even  = GenericHash::detail::kRandVals[odd ^ ((n >> 8) & 0xff)];
@@ -489,22 +488,16 @@ inline uint64 MurmurHash64( const void *key, int len, uint32 seed )
 
 	// Mix 4 bytes at a time into the hash
 
-	const uint8 *data = (const uint8 *)key;
+	const uint32 *data = (const uint32 *)key;
 
 	while(len >= 8)
 	{
-		uint32 k1;
-		memcpy( &k1, data, sizeof( k1 ) );
-		data += sizeof( k1 );
-		k1 = LittleDWord( k1 );
+		uint32 k1 = LittleDWord( *data++ );
 		k1 *= m; k1 ^= k1 >> r; k1 *= m;
 		h1 *= m; h1 ^= k1;
 		len -= 4;
 
-		uint32 k2;
-		memcpy( &k2, data, sizeof( k2 ) );
-		data += sizeof( k2 );
-		k2 = LittleDWord( k2 );
+		uint32 k2 = LittleDWord( *data++ );
 		k2 *= m; k2 ^= k2 >> r; k2 *= m;
 		h2 *= m; h2 ^= k2;
 		len -= 4;
@@ -512,10 +505,7 @@ inline uint64 MurmurHash64( const void *key, int len, uint32 seed )
 
 	if(len >= 4)
 	{
-		uint32 k1;
-		memcpy( &k1, data, sizeof( k1 ) );
-		data += sizeof( k1 );
-		k1 = LittleDWord( k1 );
+		uint32 k1 = LittleDWord( *data++ );
 		k1 *= m; k1 ^= k1 >> r; k1 *= m;
 		h1 *= m; h1 ^= k1;
 		len -= 4;
@@ -525,9 +515,9 @@ inline uint64 MurmurHash64( const void *key, int len, uint32 seed )
 
 	switch(len)
 	{
-		case 3: h2 ^= data[2] << 16;
-		case 2: h2 ^= data[1] << 8;
-		case 1: h2 ^= data[0];
+		case 3: h2 ^= ((const uint8 *)data)[2] << 16;
+		case 2: h2 ^= ((const uint8 *)data)[1] << 8;
+		case 1: h2 ^= ((const uint8 *)data)[0];
 			h2 *= m;
 	};
 

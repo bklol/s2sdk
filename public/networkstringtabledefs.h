@@ -26,7 +26,6 @@ const unsigned int INVALID_STRING_INDEX = (unsigned int)-1;
 #define INTERFACENAME_NETWORKSTRINGTABLESERVER "Source2EngineToServerStringTable001"
 #define INTERFACENAME_NETWORKSTRINGTABLECLIENT "Source2EngineToClientStringTable001"
 
-class StringTableInit_t;
 class INetworkStringTable;
 
 template <typename Signature>
@@ -65,7 +64,8 @@ public:
 	virtual int				GetNumStrings( void ) const = 0;
 
 	// Networking
-	virtual void			SetStringChangeTick( int tick_count, void *unknown ) = 0;
+	// pChangeTicks, if given, replaces the ticks of the table's last change and the one before (ChangedBetweenTicks)
+	virtual void			SetStringChangeTick( int tick_count, const int *pChangeTicks ) = 0;
 	virtual int				GetTick( void ) = 0;
 	virtual bool			ChangedBetweenTicks(int tickA, int tickB ) const = 0;
 
@@ -86,6 +86,18 @@ enum ENetworkStringtableFlags
 {
 	NSF_NONE = 0,
 	NSF_DICTIONARY_ENABLED  = (1<<0), // Uses pre-calculated per map dictionaries to reduce bandwidth
+};
+
+class StringTableInit_t
+{
+public:
+	const char *m_pTableName;
+	// Size in bytes of every string's user data, 0 when it varies; at most 16384 without m_bUsingVarintBitCounts
+	int m_nUserDataFixedSize;
+	// At most 17 without m_bUsingVarintBitCounts
+	int m_nUserDataNetworkBits;
+	int m_nFlags; // ENetworkStringtableFlags
+	bool m_bUsingVarintBitCounts;
 };
 
 class INetworkStringTableContainer: public IAppSystem

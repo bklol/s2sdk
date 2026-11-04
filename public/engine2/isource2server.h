@@ -36,6 +36,7 @@
 #include "scenesystem/iscenesystem.h"
 #include "const.h"
 #include "networksystem/networksystemtypes.h"
+#include "tier2/fieldpath.h"
 
 class KeyValues3;
 class CUtlBuffer;
@@ -60,34 +61,43 @@ struct NetMessageInfo_t;
 class CNetMessage;
 
 // Max # of variable changes we'll track in an entity before we treat it
-// like they all changed.
-#define MAX_CHANGE_OFFSETS	19
-#define MAX_EDICT_CHANGE_INFOS	100
+// like they all changed, unless CNetworkTransmitComponent::m_nMaxChangedOffsets sets another limit.
+#define MAX_CHANGE_OFFSETS	48
+#define MAX_EDICT_CHANGE_INFOS	3000
+
+// AMNOTE: The network state changes of one entity, as CEdictChangeInfo holds them; the server also builds one on its
+// own to resolve a single change
+struct VarChangeList_t
+{
+	// Edicts remember the offsets of properties that change
+	CUtlVectorFixedGrowable<VarChangeInfo_t, MAX_CHANGE_OFFSETS> m_ChangeOffsets;
+	// The changed element indices of networked vectors, up to 64 per list
+	CUtlVectorFixedGrowable<uint16 *, 16> m_ChangedElements;
+	// Changed fields under a branch, added only while they and m_ChangeOffsets stay under MAX_CHANGE_OFFSETS
+	CUtlVector<CFieldPath> m_ChangedFieldPaths;
+};
 
 class CEdictChangeInfo
 {
 public:
 	ChangeAccessorFieldPathIndexInfo_t *m_pChangeAccessorFieldPathInfo;
-	// Edicts remember the offsets of properties that change 
-	VarChangeInfo_t m_ChangeOffsets[MAX_CHANGE_OFFSETS];
-	uint32 m_nChangeOffsets;
+	VarChangeList_t m_Changes;
 };
 
 // Shared between engine and game DLL.
 class CSharedEdictChangeInfo
 {
 public:
-	CSharedEdictChangeInfo()
-	{
-		m_iSerialNumber = 1;
-	}
-
-	// Matched against edict_t::m_iChangeInfoSerialNumber to determine if its
-	// change info is valid.
-	unsigned short m_iSerialNumber;
+	CSharedEdictChangeInfo() : m_iSerialNumber( 1 ), m_nHighWaterMark( 0 ), m_nChangeInfos( 0 ) {}
 
 	CEdictChangeInfo m_ChangeInfos[MAX_EDICT_CHANGE_INFOS];
-	unsigned short m_nChangeInfos;	// How many are in use this frame.
+
+	// Matched against CChangeInfoAccessor::m_iChangeInfoSerialNumber to determine if its
+	// change info is valid.
+	uint16 m_iSerialNumber;
+
+	uint32 m_nHighWaterMark; // The most change infos any frame has used
+	uint32 m_nChangeInfos;	// How many are in use this frame.
 };
 extern CSharedEdictChangeInfo *g_pSharedChangeInfo;
 
@@ -142,8 +152,7 @@ public:
 	// Called to apply lobby settings to a dedicated server
 	virtual void			ApplyGameSettings( KeyValues *pKV ) = 0;
 
-	// The server should run physics/think on all edicts
-	// One of these bools is 'simulating'... probably
+	// The server should run physics/think on all edicts. bFirstTick and bLastTick are the frame's EventSimulate_t ones
 	virtual void			GameFrame( bool simulating, bool bFirstTick, bool bLastTick ) = 0;
 
 	// Returns true if the game DLL wants the server not to be made public.
@@ -208,7 +217,7 @@ public:
 
 	virtual bool			SaveGame_CalcFileName( const char *pszSaveName, CUtlString &fileName ) = 0;
 	virtual bool			GetRequiredAddonsFromSaveFile( const char *pszSaveName, CUtlString &requiredAddons ) = 0;
-	virtual void			GetLevelsFromSaveFile( const char *pszSaveName, CUtlVector<CCreateGameServerLoadInfo> &levels, bool bWipeAndExtract, int, CUtlString *pComment ) = 0;
+	virtual void			GetLevelsFromSaveFile( const char *pszSaveName, CUtlVector<CCreateGameServerLoadInfo> &levels, bool bWipeAndExtract, int saveFileLevelsType, CUtlString *pComment ) = 0;
 	virtual void			ClearSaveDirectory( void ) = 0;
 	virtual void			PreSaveGameLoaded( const char *pszSaveName ) = 0;
 	virtual void			AppendSaveGameResources( HGameResourceManifest hManifest, ILoadingSpawnGroup *pLoadingSpawnGroup, SpawnGroupHandle_t hSpawnGroup, const void * ) = 0;
@@ -338,6 +347,33 @@ enum EncryptedMessageKeyType_t
 	kEncryptedMessageKeyType_Public = 2, // tv_encryptdata_key_pub
 };
 
+enum ClientPutInServerType_t
+{
+	CLIENT_PUT_IN_SERVER_PLAYER = 0,
+	CLIENT_PUT_IN_SERVER_FAKE_PLAYER,
+	CLIENT_PUT_IN_SERVER_HLTV,
+};
+
+// The player's usercmd state that WriteDeltaEntities sends in CSVCMsg_PacketEntities
+struct PlayerCommandStatus_t
+{
+	int m_nLastCmdNumberExecuted;
+	int m_nLastCmdNumberReceived;
+	// In seconds, -1 before the first usercmd; m_CmdRecvStatus is only sent when it isn't negative
+	float m_flLastCmdRecvMargin;
+
+	// Sent as cmd_recv_status, a shorter list ends with 65599
+	int m_CmdRecvStatus[8];
+	int m_nStarvedCommandTicks;
+	int m_nDiscardedCommandTicks;
+
+	// AMNOTE: The server zeroes it, nothing else writes or reads it
+	int m_unk101;
+
+	// Set when the player's command queue filled m_nStarvedCommandTicks and m_nDiscardedCommandTicks
+	bool m_bHasCommandQueueStats;
+};
+
 //-----------------------------------------------------------------------------
 // Purpose: Player / Client related functions
 //-----------------------------------------------------------------------------
@@ -348,14 +384,10 @@ public:
 
 	// Called when the client attempts to connect (doesn't get called for bots)
 	// returning false would reject the connection with the pRejectReason message
-	virtual bool			ClientConnect( CPlayerSlot slot, const char *pszName, uint64 xuid, const char *pszNetworkID, bool unk1, CBufferString *pRejectReason ) = 0;
+	virtual bool			ClientConnect( CPlayerSlot slot, const char *pszName, uint64 xuid, const char *pszNetworkID, bool bLoadGame, CBufferString *pRejectReason ) = 0;
 
 	// Client is connected and should be put in the game
-	// type values could be:
-	// 0 - player
-	// 1 - fake player (bot)
-	// 2 - unknown
-	virtual void			ClientPutInServer( CPlayerSlot slot, char const *pszName, int type, uint64 xuid ) = 0;
+	virtual void			ClientPutInServer( CPlayerSlot slot, char const *pszName, ClientPutInServerType_t type, uint64 xuid ) = 0;
 
 	// Client is going active
 	// If bLoadGame is true, don't spawn the player because its state is already setup.
@@ -420,8 +452,7 @@ public:
 	virtual IHLTVDirector	*GetHLTVDirector( void ) = 0;
 
 	virtual uint32			GetPlayerTickBase( CPlayerSlot slot ) = 0;
-	// AMNOTE: Fills a 60-byte structure from the player's controller
-	virtual void			unk101( CPlayerSlot slot, void *pOut ) = 0;
+	virtual void			GetPlayerCommandStatus( CPlayerSlot slot, PlayerCommandStatus_t *pOut ) = 0;
 
 	// Handles incoming usermessages from the client
 	virtual void			ClientSvcUserMessage( CPlayerSlot slot, int um_type, uint32 size, const void *buf ) = 0;

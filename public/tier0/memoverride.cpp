@@ -428,7 +428,6 @@ void __cdecl operator delete[] ( void *pMem, std::align_val_t, const std::nothro
 {
 	g_pMemAlloc->RegionFreeAligned( MEMALLOC_REGION_FREE_NEW_ARRAY_ALIGNED, pMem );
 }
-
 #endif
 
 
