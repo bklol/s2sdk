@@ -29,7 +29,7 @@ class	INetChannel;
 class	INetChannelInfo;
 class	INetMessageBinder;
 class	INetworkMessageProcessingPreFilter;
-class	INetworkMessageInternal;
+struct NetMessageInfo_t;
 class	INetMessageDispatcher;
 class	InstantReplayMessage_t;
 class	CUtlSlot;
@@ -106,8 +106,8 @@ public:
 	// bConfirmAllMessageHandlersInstalled reports the messages of the channel's categories that have no handler registered
 	virtual void	FinishRegisteringMessageHandlers( bool bConfirmAllMessageHandlersInstalled ) = 0;
 	
-	virtual void	RegisterNetMessageHandlerAbstract( CUtlSlot *nSlot, const CUtlAbstractDelegate &delegate, int nParamCount, INetworkMessageInternal *pNetMessage, int nPriority ) = 0;
-	virtual void	UnregisterNetMessageHandlerAbstract( CUtlSlot *nSlot, const CUtlAbstractDelegate &delegate, INetworkMessageInternal *pNetMessage ) = 0;
+	virtual void	RegisterNetMessageHandlerAbstract( CUtlSlot *nSlot, const CUtlAbstractDelegate &delegate, int nParamCount, NetMessageInfo_t *pNetMessage, int nPriority ) = 0;
+	virtual void	UnregisterNetMessageHandlerAbstract( CUtlSlot *nSlot, const CUtlAbstractDelegate &delegate, NetMessageInfo_t *pNetMessage ) = 0;
 	
 	virtual int		GetNumBitsWritten( NetChannelBufType_t bufferType ) const = 0;
 	virtual void	SetDemoRecorder( IDemoRecorderBase *pDemoRecorder ) = 0;
